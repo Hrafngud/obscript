@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obscript split result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rationale", "parts"],
+  "properties": {
+    "rationale": {"type": "string"},
+    "parts": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "knowledge.schema.json"}
+    }
+  }
+}

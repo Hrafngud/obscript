@@ -1,0 +1,4 @@
+interface:
+  display_name: "Remix"
+  short_description: "Unify several video knowledge models"
+  default_prompt: "Use $remix to merge these analyzed sources into one coherent PT-BR knowledge model."

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obscript video script",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "language", "metadata", "title", "thesis", "sections"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "language": {"type": "string", "const": "pt-BR"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "time_controller", "pipeline", "target_duration_seconds"],
+      "properties": {
+        "format": {"type": "string", "enum": ["source", "topics", "essay"]},
+        "time_controller": {"type": "string", "enum": ["normal", "compress", "extend"]},
+        "pipeline": {"type": "string", "enum": ["single", "remix", "split"]},
+        "target_duration_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "title": {"type": "string"},
+    "thesis": {"type": "string"},
+    "sections": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "type", "purpose", "topic_refs", "estimated_seconds", "narration"],
+        "properties": {
+          "id": {"type": "string"},
+          "title": {"type": "string"},
+          "type": {"type": "string", "enum": ["hook", "introduction", "body", "counterpoint", "synthesis", "conclusion"]},
+          "purpose": {"type": "string"},
+          "topic_refs": {"type": "array", "items": {"type": "string"}},
+          "estimated_seconds": {"type": "integer", "minimum": 1},
+          "narration": {"type": "string"}
+        }
+      }
+    }
+  }
+}

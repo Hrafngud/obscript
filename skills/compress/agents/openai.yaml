@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compress"
+  short_description: "Compress video knowledge by importance"
+  default_prompt: "Use $compress to fit this knowledge model to the target duration while preserving its argument chain."

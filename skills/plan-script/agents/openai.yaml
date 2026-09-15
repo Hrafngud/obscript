@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Script"
+  short_description: "Build a timed plan before narration"
+  default_prompt: "Use $plan-script to build a timed PT-BR script plan from this transformed knowledge model."

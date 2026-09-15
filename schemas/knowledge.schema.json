@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obscript knowledge model",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "sources", "summary", "topics", "relationships", "source_order", "narrative", "recommended_duration_seconds"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "kind": {"type": "string", "enum": ["single", "remix", "split"]},
+    "sources": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "summary": {"$ref": "#/$defs/summary"},
+    "topics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/topic"}
+    },
+    "relationships": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/relationship"}
+    },
+    "source_order": {"type": "array", "items": {"type": "string"}},
+    "narrative": {"$ref": "#/$defs/narrative"},
+    "recommended_duration_seconds": {"type": "integer", "minimum": 1}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "source", "language", "duration_seconds"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "source": {"type": "string"},
+        "language": {"type": "string"},
+        "duration_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thesis", "objective"],
+      "properties": {
+        "thesis": {"type": "string"},
+        "objective": {"type": "string"}
+      }
+    },
+    "argument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim", "support"],
+      "properties": {
+        "claim": {"type": "string"},
+        "support": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "summary", "facts", "arguments", "examples", "tangents", "importance", "source_refs"],
+      "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "facts": {"type": "array", "items": {"type": "string"}},
+        "arguments": {"type": "array", "items": {"$ref": "#/$defs/argument"}},
+        "examples": {"type": "array", "items": {"type": "string"}},
+        "tangents": {"type": "array", "items": {"type": "string"}},
+        "importance": {"type": "number", "minimum": 0, "maximum": 1},
+        "source_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "type"],
+      "properties": {
+        "from": {"type": "string"},
+        "to": {"type": "string"},
+        "type": {"type": "string"}
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "intent"],
+      "properties": {
+        "from": {"type": "string"},
+        "to": {"type": "string"},
+        "intent": {"type": "string"}
+      }
+    },
+    "narrative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "hook_intent", "conclusion_intent", "ordered_topic_ids", "transition_intents"],
+      "properties": {
+        "format": {"type": "string", "enum": ["source", "topics", "essay"]},
+        "hook_intent": {"type": "string"},
+        "conclusion_intent": {"type": "string"},
+        "ordered_topic_ids": {"type": "array", "items": {"type": "string"}},
+        "transition_intents": {"type": "array", "items": {"$ref": "#/$defs/transition"}}
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Translate Context"
+  short_description: "Normalize concepts into natural PT-BR"
+  default_prompt: "Use $translate-context to normalize this knowledge model into natural PT-BR without writing narration."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Split"
+  short_description: "Split a source into semantic video concepts"
+  default_prompt: "Use $split to divide this knowledge model at natural conceptual boundaries."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Script"
+  short_description: "Write original spoken PT-BR narration"
+  default_prompt: "Use $write-script to write the planned video narration in natural Brazilian Portuguese."

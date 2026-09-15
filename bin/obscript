@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OBScript_ENTRYPOINT="$(readlink -f -- "${BASH_SOURCE[0]}")"
+OBScript_ROOT="$(cd -- "$(dirname -- "$OBScript_ENTRYPOINT")/.." && pwd)"
+export PYTHONPATH="$OBScript_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m obscript "$@"

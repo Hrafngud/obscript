@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Script"
+  short_description: "Review PT-BR scripts against source knowledge"
+  default_prompt: "Use $review-script to independently audit this script and return structured findings."

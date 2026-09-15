@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyze Source"
+  short_description: "Extract a PT-BR video knowledge model"
+  default_prompt: "Use $analyze-source to turn this transcript into normalized PT-BR knowledge, without writing a script."

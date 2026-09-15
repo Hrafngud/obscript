@@ -1,0 +1,4 @@
+interface:
+  display_name: "Topics"
+  short_description: "Shape knowledge into a topic-led video"
+  default_prompt: "Use $topics to organize this knowledge model into a continuous topic-led structure."

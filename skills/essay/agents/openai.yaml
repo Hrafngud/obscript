@@ -1,0 +1,4 @@
+interface:
+  display_name: "Essay"
+  short_description: "Shape knowledge into a video essay"
+  default_prompt: "Use $essay to organize this knowledge model into a thesis-led video essay."

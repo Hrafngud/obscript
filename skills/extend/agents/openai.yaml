@@ -1,0 +1,4 @@
+interface:
+  display_name: "Extend"
+  short_description: "Deepen video knowledge without filler"
+  default_prompt: "Use $extend to deepen this knowledge model to the target duration with relevant substance."

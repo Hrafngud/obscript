@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obscript script review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "verdict", "duration", "coverage", "issues", "recommendation"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "verdict": {"type": "string", "enum": ["pass", "revise"]},
+    "duration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_seconds", "estimated_seconds", "status"],
+      "properties": {
+        "expected_seconds": {"type": "integer", "minimum": 1},
+        "estimated_seconds": {"type": "integer", "minimum": 1},
+        "status": {"type": "string", "enum": ["on_target", "too_short", "too_long"]}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "missing_topic_refs"],
+      "properties": {
+        "status": {"type": "string", "enum": ["complete", "incomplete"]},
+        "missing_topic_refs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["section", "type", "severity", "description", "fix"],
+        "properties": {
+          "section": {"type": "string"},
+          "type": {"type": "string"},
+          "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+          "description": {"type": "string"},
+          "fix": {"type": "string"}
+        }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rerun", "reason"],
+      "properties": {
+        "rerun": {"type": "array", "items": {"type": "string", "enum": ["compress", "extend", "topics", "essay", "plan-script", "write-script"]}},
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}
