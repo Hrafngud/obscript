@@ -107,7 +107,10 @@ def _normalize_transcript_file(local: Path, source: str, transcripts_dir: Path) 
     return asset
 
 
-def ingest_source(source: str, *, ytstt: Path, transcripts_dir: Path) -> list[SourceAsset]:
+def ingest_source(
+    source: str, *, ytstt: Path, transcripts_dir: Path,
+    cookies_from_browser: str | None = None, cookies: Path | None = None,
+) -> list[SourceAsset]:
     local = Path(source).expanduser()
     if local.is_dir():
         return [_asset_from_directory(local.resolve(), source)]
@@ -117,6 +120,10 @@ def ingest_source(source: str, *, ytstt: Path, transcripts_dir: Path) -> list[So
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     batch = unique_directory(transcripts_dir, f"obscript-{stamp}")
     command = [str(ytstt), source, "--output-dir", str(batch), "--format", "txt,srt,json"]
+    if cookies:
+        command.extend(["--cookies", str(cookies)])
+    elif cookies_from_browser:
+        command.extend(["--cookies-from-browser", cookies_from_browser])
     try:
         subprocess.run(command, check=True)
     except FileNotFoundError as exc:

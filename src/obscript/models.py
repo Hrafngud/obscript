@@ -38,3 +38,5 @@ class RuntimeConfig:
     review_passes: int
     project_name: str | None
     verbose: bool
+    cookies_from_browser: str | None = None
+    cookies: Path | None = None

@@ -2,12 +2,32 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from obscript.transcribe import _subtitle_to_text, ingest_source
 
 
 class TranscriptionTests(unittest.TestCase):
+    def test_authentication_forwarding(self) -> None:
+        for options, expected in (
+            ({"cookies_from_browser": "firefox:default"}, ["--cookies-from-browser", "firefox:default"]),
+            ({"cookies": Path("cookies.txt")}, ["--cookies", "cookies.txt"]),
+            ({}, []),
+        ):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
+                def transcribe(command, **kwargs):
+                    batch = Path(command[command.index("--output-dir") + 1])
+                    output = batch / "video"
+                    output.mkdir()
+                    (output / "transcript.txt").write_text("a transcript", encoding="utf-8")
+
+                with patch("obscript.transcribe.subprocess.run", side_effect=transcribe) as run:
+                    ingest_source("https://youtu.be/video", ytstt=Path("ytstt"),
+                                  transcripts_dir=Path(temporary), **options)
+                command = run.call_args.args[0]
+                self.assertEqual(command[6:], expected)
+
     def test_subtitle_normalization(self) -> None:
         source = """1
 00:00:00,000 --> 00:00:02,000

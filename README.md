@@ -53,6 +53,25 @@ obscript split compress essay VIDEO --target-duration 8m
 
 A source may be a video URL, playlist URL, local media file, transcript directory, or `.txt`, `.srt`, `.vtt`, or `ytstt` `.json` transcript.
 
+Install cookie support for the workstation's existing `ytstt` once:
+
+```bash
+python3 scripts/install-ytstt-auth.py --apply
+```
+
+The installer backs up `ytstt.py` before patching it and installs the versioned authentication adapter beside it. Omit `--apply` to review the diff; use `--ytstt-home PATH` for another installation. Reapply after a `ytstt` update if needed.
+
+With the adapter installed, YouTube bot-check or login errors trigger one retry with a detected browser's cookies (Firefox first, then other supported local browsers). Sign in to YouTube in Firefox. Authentication applies to both URL inspection and audio downloads, including individual playlist items; unrelated download errors are not retried. To choose a browser or profile explicitly:
+
+```bash
+obscript 'https://www.youtube.com/watch?v=C3-FIM2xTIw' --render
+obscript VIDEO --cookies-from-browser firefox
+obscript VIDEO --cookies-from-browser 'chrome:Default'
+obscript VIDEO --cookies /path/to/cookies.txt
+```
+
+Set `OBSCRIPT_COOKIES_FROM_BROWSER=firefox` in your shell to persist a preference. Use `--cookies-from-browser none` to disable automatic authentication. Exported files must use Netscape cookie format. If YouTube rejects the cookies, refresh the browser login and retry; cookies cannot guarantee access against every YouTube restriction.
+
 Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
 
 Every approved script also produces `creative-direction.md`, an Obsidian-readable `storybook.md`, and the structured `storybook.yaml`. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. `--render` creates silent animations through the installed `$hyperframes` skill; it does not change the approved narration. Rendering uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.

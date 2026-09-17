@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -75,6 +76,17 @@ is mandatory and has no translate modifier.
         type=Path,
         default=None,
         help="Codex CLI executable (default: resolve from PATH)",
+    )
+    auth = parser.add_mutually_exclusive_group()
+    auth.add_argument(
+        "--cookies-from-browser",
+        default=os.environ.get("OBSCRIPT_COOKIES_FROM_BROWSER"),
+        metavar="BROWSER[:PROFILE]",
+        help="use a logged-in browser for YouTube; auto retries with a detected browser when blocked",
+    )
+    auth.add_argument(
+        "--cookies", type=Path, metavar="FILE",
+        help="use an exported Netscape cookies file instead of browser cookies",
     )
     parser.add_argument("--model", help="Codex model override; default uses Codex config")
     parser.add_argument(
@@ -163,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             review_passes=args.review_passes,
             project_name=args.project,
             verbose=args.verbose,
+            cookies_from_browser=args.cookies_from_browser if not args.cookies else None,
+            cookies=args.cookies.expanduser().resolve() if args.cookies else None,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, CodexError, ProductionError, OSError) as exc:

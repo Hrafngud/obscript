@@ -53,6 +53,8 @@ class Pipeline:
                     source,
                     ytstt=self.config.ytstt,
                     transcripts_dir=self.config.transcripts_dir,
+                    cookies_from_browser=self.config.cookies_from_browser,
+                    cookies=self.config.cookies,
                 )
             )
         if spec.pipeline == "remix" and len(assets) < 2:
