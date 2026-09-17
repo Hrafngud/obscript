@@ -344,6 +344,7 @@ class ProductionExecutionTests(unittest.TestCase):
         self.duration = 12.0
         self.scene_duration = 3.0
         self.escape_output = False
+        self.missing_scene = None
 
     def produce(self):
         return self.agent.produce(script_path=self.paths["script"], direction_path=self.paths["direction"],
@@ -352,34 +353,33 @@ class ProductionExecutionTests(unittest.TestCase):
     def execute_fixture(self, stage, request_path, output_dir):
         self.calls.append(stage)
         request = read_json(request_path)
-        if stage == self.failure:
-            raise ProductionError("Synthetic backend failure")
         if self.mutate:
             self.paths["script"].write_text("changed upstream")
-        if request["operation"] == "assembly":
-            self.assertEqual(request["audio_policy"], "none")
-            self.assertFalse(request["hyperframes"]["render"]["audio"])
-            self.assertEqual(request["target_duration_seconds"], 12)
-            self.assertEqual([item["scene"]["timing"]["estimated_start_seconds"] for item in request["scenes"]], [0, 3, 6, 9])
-            self.assertEqual([item["scene"]["id"] for item in request["scenes"]], [f"scene-{i:03d}" for i in range(1, 5)])
-            Path(request["output_video"]).write_bytes(b"assembled fixture")
-            return
-        scene = request["scene"]
-        self.assertEqual(request["narration_reference"], scene["voiceover"]["text"])
+        self.assertEqual(request["operation"], "video")
+        self.assertEqual(request["storybook"], story_fixture())
         self.assertEqual(request["audio_policy"], "none")
         self.assertFalse(request["hyperframes"]["render"]["audio"])
         self.assertEqual(request["hyperframes"]["brief"]["narration"], "no")
         self.assertTrue(request["hyperframes"]["render_authorized"])
         self.assertEqual(request["creative_direction"], direction_fixture())
-        if scene["order"] > 1:
-            previous = output_dir.parent / f"scene-{scene['order'] - 1:03d}" / "manifest.json"
-            self.assertEqual(read_json(previous)["status"], "complete")
-        (output_dir / "scene.mp4").write_bytes(b"scene fixture")
-        write_json(output_dir / "manifest.json", {
-            "scene_id": scene["id"], "script_section_id": scene["script_section_id"], "generator": "hyperframes",
-            "status": "complete", "estimated_duration_seconds": 3, "actual_duration_seconds": 3,
-            "output_files": ["../escape.mp4"] if self.escape_output else ["scene.mp4"],
-        })
+        self.assertEqual(request["target_duration_seconds"], 12)
+        self.assertEqual(request["hyperframes"]["project_directory"], str(output_dir / "hyperframes"))
+        for scene, output in zip(request["storybook"]["scenes"], request["scene_outputs"]):
+            self.assertEqual(output["scene_id"], scene["id"])
+            if scene["id"] == self.failure:
+                raise ProductionError("Synthetic backend failure")
+            if scene["id"] == self.missing_scene:
+                continue
+            scene_dir = Path(output["output_directory"])
+            (scene_dir / "scene.mp4").write_bytes(b"scene fixture")
+            write_json(Path(output["manifest"]), {
+                "scene_id": scene["id"], "script_section_id": scene["script_section_id"], "generator": "hyperframes",
+                "status": "complete", "estimated_duration_seconds": 3, "actual_duration_seconds": 3,
+                "output_files": ["../escape.mp4"] if self.escape_output else ["scene.mp4"],
+            })
+        if self.failure == "assembly":
+            raise ProductionError("Synthetic backend failure")
+        Path(request["output_video"]).write_bytes(b"assembled fixture")
 
     def probe_fixture(self, path):
         return self.duration if path.name == "assembled.mp4" else self.scene_duration
@@ -388,10 +388,11 @@ class ProductionExecutionTests(unittest.TestCase):
         with patch.object(self.agent, "_execute", side_effect=self.execute_fixture), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
             return self.produce()
 
-    def test_sequential_durable_scene_production_and_actual_duration(self):
+    def test_single_run_produces_complete_storybook_and_actual_duration(self):
         output = self.patched_produce()
         self.assertEqual(output, self.root / "video.mp4")
-        self.assertEqual(self.calls, [f"produce-scene-{i:03d}" for i in range(1, 5)] + ["assemble-video"])
+        self.assertEqual(self.calls, ["produce-video"])
+        self.assertEqual(len(list((self.root / ".obscript").glob("*.request.json"))), 1)
         manifest = load_yaml(self.root / "production.yaml")
         self.assertEqual(manifest["status"], "complete")
         self.assertEqual(manifest["backend"], "hyperframes")
@@ -401,7 +402,7 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(manifest["final_video"], "video.mp4")
 
     def test_scene_failure_keeps_prior_scene_and_blocks_assembly(self):
-        self.failure = "produce-scene-002"
+        self.failure = "scene-002"
         with self.assertRaises(ProductionError):
             self.patched_produce()
         manifest = load_yaml(self.root / "production.yaml")
@@ -409,10 +410,10 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(read_json(self.root / "production/scenes/scene-002/manifest.json")["status"], "failed")
         self.assertIsNone(manifest["final_video"])
         self.assertFalse((self.root / "video.mp4").exists())
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls, ["produce-video"])
 
     def test_assembly_failure_never_publishes_final_video(self):
-        self.failure = "assemble-video"
+        self.failure = "assembly"
         with self.assertRaises(ProductionError):
             self.patched_produce()
         manifest = load_yaml(self.root / "production.yaml")
@@ -427,11 +428,25 @@ class ProductionExecutionTests(unittest.TestCase):
             self.patched_produce()
         self.assertFalse((self.root / "video.mp4").exists())
 
-    def test_scene_duration_drift_blocks_later_scenes_and_assembly(self):
+    def test_executor_failure_blocks_publication_even_with_all_outputs(self):
+        def fail_after_render(stage, request_path, output_dir):
+            self.execute_fixture(stage, request_path, output_dir)
+            raise ProductionError("Executor failed after rendering")
+        with patch.object(self.agent, "_execute", side_effect=fail_after_render), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaisesRegex(ProductionError, "Executor failed after rendering"):
+                self.produce()
+        manifest = load_yaml(self.root / "production.yaml")
+        self.assertTrue(all(item["status"] == "complete" for item in manifest["scenes"]))
+        self.assertEqual(manifest["status"], "failed")
+        self.assertIsNone(manifest["final_video"])
+        self.assertTrue((self.root / "production/assembled.mp4").exists())
+        self.assertFalse((self.root / "video.mp4").exists())
+
+    def test_scene_duration_drift_blocks_publication(self):
         self.scene_duration = 4
         with self.assertRaisesRegex(ProductionError, "scene-001: animation duration differs"):
             self.patched_produce()
-        self.assertEqual(self.calls, ["produce-scene-001"])
+        self.assertEqual(self.calls, ["produce-video"])
         self.assertFalse((self.root / "video.mp4").exists())
         self.assertEqual(load_yaml(self.root / "production.yaml")["scenes"][0]["status"], "failed")
 
@@ -472,15 +487,11 @@ class ProductionExecutionTests(unittest.TestCase):
                                storybook_path=yaml_path, review_path=self.paths["review"])
         execute.assert_not_called()
 
-    def test_assembly_cannot_modify_completed_scenes(self):
-        original_execute = self.execute_fixture
-        def mutate_scene(stage, request_path, output_dir):
-            original_execute(stage, request_path, output_dir)
-            if stage == "assemble-video":
-                (self.root / "production/scenes/scene-001/scene.mp4").write_bytes(b"modified")
-        with patch.object(self.agent, "_execute", side_effect=mutate_scene), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
-            with self.assertRaisesRegex(ProductionError, "completed scene artifact"):
-                self.produce()
+    def test_missing_scene_blocks_publication_even_when_assembly_exists(self):
+        self.missing_scene = "scene-002"
+        with self.assertRaisesRegex(ProductionError, "Invalid scene manifest"):
+            self.patched_produce()
+        self.assertTrue((self.root / "production/assembled.mp4").exists())
         self.assertFalse((self.root / "video.mp4").exists())
         self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "failed")
 
@@ -491,33 +502,34 @@ class ProductionExecutionTests(unittest.TestCase):
                         "-t", "3", "-c:v", "mpeg4", "-an", str(fixture)], check=True, capture_output=True)
         def local_executor(stage, request_path, output_dir):
             request = read_json(request_path)
-            if request["operation"] == "scene":
-                self.execute_fixture(stage, request_path, output_dir)
-                shutil.copy2(fixture, output_dir / "scene.mp4")
-            else:
-                paths = [Path(item["manifest"]).parent / "scene.mp4" for item in request["scenes"]]
-                command = ["ffmpeg", "-v", "error"]
-                for path in paths:
-                    command.extend(["-i", str(path)])
-                command.extend(["-filter_complex", "[0:v][1:v][2:v][3:v]concat=n=4:v=1:a=0[v]",
-                                "-map", "[v]", "-c:v", "mpeg4", "-an", request["output_video"]])
-                subprocess.run(command, check=True, capture_output=True)
+            self.execute_fixture(stage, request_path, output_dir)
+            paths = [Path(item["output_directory"]) / "scene.mp4" for item in request["scene_outputs"]]
+            for path in paths:
+                shutil.copy2(fixture, path)
+            command = ["ffmpeg", "-v", "error"]
+            for path in paths:
+                command.extend(["-i", str(path)])
+            command.extend(["-filter_complex", "[0:v][1:v][2:v][3:v]concat=n=4:v=1:a=0[v]",
+                            "-map", "[v]", "-c:v", "mpeg4", "-an", "-y", request["output_video"]])
+            subprocess.run(command, check=True, capture_output=True)
         with patch.object(self.agent, "_execute", side_effect=local_executor):
             video = self.produce()
         self.assertAlmostEqual(probe_media(video), 12, delta=0.04)
         self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
 
     def test_production_executor_has_write_boundary_without_schema(self):
-        output = self.root / "production/scenes/scene-001"
+        output = self.root / "production"
         output.mkdir(parents=True)
         request = self.root / ".obscript/request.json"
         write_json(request, {})
         with patch("obscript.production.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "done", "")) as run:
-            self.agent._execute("produce-scene-001", request, output)
+            self.agent._execute("produce-video", request, output)
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--sandbox") + 1], "workspace-write")
+        self.assertEqual(command[command.index("-C") + 1], str(output))
         self.assertNotIn("--output-schema", command)
         self.assertIn("$hyperframes", run.call_args.kwargs["input"])
+        self.assertIn("Do not launch nested Codex runs", run.call_args.kwargs["input"])
         self.assertTrue((output / "executor.log").exists())
 
 

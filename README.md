@@ -80,10 +80,10 @@ creative-direction.md
 storybook.md              # readable scene plan for Obsidian
 storybook.yaml            # structured production plan
 production/               # only with --render
+  hyperframes/            # shared editable composition project
   scenes/scene-001/
     manifest.json
     ...silent rendered scene media...
-    hyperframes/          # editable composition project
 production.yaml           # only after a render attempt
 video.mp4                 # silent animations, only after verified assembly
 run.yaml
@@ -96,9 +96,9 @@ If the last script review still requests revision, `script.md` and `review.yaml`
 
 The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The creative direction JSON supplies the visual identity; `creative-direction.md` documents it. `storybook.md` displays the complete scene plan: timeline, exact narration reference, composition, visual elements, on-screen text, motion, transitions, assets, and render briefs. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
 
-Rendering processes scenes sequentially through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the complete direction and scene, immutable narration reference, planned timestamps, output directory, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The producer initializes an editable project under each scene directory and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+Rendering uses one Codex run per video through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the complete creative direction and storybook, immutable narration references, planned timestamps, scene output destinations, final video destination, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The same agent produces every scene and the final assembly, reusing loaded skills and creative context without launching additional Codex runs. The producer initializes one editable project at `production/hyperframes/` and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
 
-Each scene is verified with ffprobe: it must contain video, contain no audio track, and match its planned duration within one frame. It gets a durable manifest before the next scene runs. Final assembly places scenes at the exact storybook timestamps and applies visual transitions inside those allocated intervals, preserving the planned total duration. Only a verified complete assembly publishes the silent `video.mp4`. `production.yaml` records `backend: hyperframes`, `audio: false`, and `status: complete` or `status: failed`; failures preserve partial scene output and leave `final_video` empty. The CLI exits with status 1 for production failures.
+The agent writes a durable manifest and silent video for each scene. After the run, the application verifies each scene with ffprobe: it must contain video, contain no audio track, and match its planned duration within one frame. Final assembly places scenes at the exact storybook timestamps and applies visual transitions inside those allocated intervals, preserving the planned total duration. Only a successful run with verified scenes and a verified complete assembly publishes the silent `video.mp4`. `production.yaml` records `backend: hyperframes`, `audio: false`, and `status: complete` or `status: failed`; executor failures still allow verification of completed scenes, preserve partial output, and leave `final_video` empty. The CLI exits with status 1 for production failures.
 
 For example, a human sees this cue in `script.md` and records the exact passage for that animation interval:
 
@@ -108,7 +108,7 @@ For example, a human sees this cue in `script.md` and records the exact passage 
 Você observa o padrão.
 ```
 
-Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates direction, storybook, and production; a direction change invalidates storybook and production; a storybook change invalidates production. Production checks that its upstream inputs and completed scene artifacts remain unchanged. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
+Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates direction, storybook, and production; a direction change invalidates storybook and production; a storybook change invalidates production. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
 
 ## Skills
 
@@ -129,6 +129,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src
 ```
 
-Structured-output schemas live in `schemas/`. Reasoning stages use `CodexAgent` with `codex exec --output-schema` in a read-only sandbox; the application writes their returned artifacts. Media execution uses a separate `ProductionAgent` with a workspace-write sandbox rooted at the scene directory (or production directory for assembly), no structured-output schema, and network access for HyperFrames dependencies and specified visual assets. This follows the [official Codex sandbox configuration](https://learn.chatgpt.com/docs/security). Production requests, prompts, responses, and executor logs remain local for inspection.
+Structured-output schemas live in `schemas/`. Reasoning stages use `CodexAgent` with `codex exec --output-schema` in a read-only sandbox; the application writes their returned artifacts. Media execution uses a separate `ProductionAgent` with a single workspace-write run rooted at the production directory, no structured-output schema, and network access for HyperFrames dependencies and specified visual assets. This follows the [official Codex sandbox configuration](https://learn.chatgpt.com/docs/security). The complete production request and prompt remain in `.obscript/produce-video.request.json` and `.obscript/produce-video.prompt.txt`; the response and executor log remain in `production/` for inspection.
 
 The tests use a simulated HyperFrames executor, verify exact script-to-scene coverage and human timestamp cues, reject scene and final-duration drift, and exercise real local silent video assembly when FFmpeg tools are available. No live model-driven HyperFrames render runs in the test suite.
