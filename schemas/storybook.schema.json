@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Obscript storybook",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target_duration_seconds",
+    "scenes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2"
+    },
+    "target_duration_seconds": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "order",
+          "script_section_id",
+          "voiceover",
+          "timing",
+          "narrative_beat",
+          "visual_goal",
+          "composition",
+          "visual_elements",
+          "onscreen_text",
+          "animation",
+          "transition_out",
+          "asset_requirements",
+          "render_brief"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^scene-[0-9]{3,}$"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "script_section_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "voiceover": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text",
+              "estimated_seconds"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "estimated_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "description": "Exact narration reference and allocated reading time for a human voiceover recorded outside obscript. No audio is generated."
+          },
+          "timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "estimated_start_seconds",
+              "estimated_end_seconds"
+            ],
+            "properties": {
+              "estimated_start_seconds": {
+                "type": "number",
+                "minimum": 0
+              },
+              "estimated_end_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "description": "Canonical scene boundaries for silent animation rendering and human narration cues."
+          },
+          "narrative_beat": {
+            "type": "string",
+            "minLength": 1
+          },
+          "visual_goal": {
+            "type": "string",
+            "minLength": 1
+          },
+          "composition": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "layout",
+              "focal_element",
+              "supporting_elements"
+            ],
+            "properties": {
+              "layout": {
+                "type": "string",
+                "minLength": 1
+              },
+              "focal_element": {
+                "type": "string",
+                "minLength": 1
+              },
+              "supporting_elements": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "visual_elements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "content",
+                "role"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "onscreen_text": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "purpose"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "animation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entrance",
+              "continuous",
+              "emphasis",
+              "exit",
+              "camera"
+            ],
+            "properties": {
+              "entrance": {
+                "type": "string",
+                "minLength": 1
+              },
+              "continuous": {
+                "type": "string",
+                "minLength": 1
+              },
+              "emphasis": {
+                "type": "string",
+                "minLength": 1
+              },
+              "exit": {
+                "type": "string",
+                "minLength": 1
+              },
+              "camera": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "transition_out": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset_requirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "description"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "render_brief": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "minItems": 1
+    }
+  }
+}

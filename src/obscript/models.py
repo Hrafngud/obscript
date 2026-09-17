@@ -12,6 +12,7 @@ class CommandSpec:
     sources: tuple[str, ...]
     target_duration_seconds: int | None = None
     split_count: int | None = None
+    render: bool = False
 
 
 @dataclass(frozen=True)

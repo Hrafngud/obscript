@@ -1,10 +1,14 @@
 # obscript
 
-`obscript` turns video sources or existing transcripts into original Brazilian Portuguese video scripts. Codex is the agent backend; `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
+`obscript` turns video sources or existing transcripts into original Brazilian Portuguese video scripts, visual pre-production, and optionally rendered silent animations. Codex is the agent backend; `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
 
 ```text
 source → analyze-source → pipeline → time → format
        → plan-script → write-script → review-script
+                                      ↓ pass
+       → creative-direction → storybook → validate-storybook
+                                      ↓ --render
+       → produce-video → package-production
 ```
 
 ## Install
@@ -38,6 +42,8 @@ Examples:
 obscript VIDEO
 obscript compress essay VIDEO
 obscript extend topics VIDEO --target-duration 20m
+obscript extend essay VIDEO --render
+obscript extend essay VIDEO --render --dry-run
 obscript remix compress essay 'VIDEO_A,VIDEO_B,VIDEO_C' --target-duration 12m
 obscript split topics VIDEO --into 4
 obscript split compress essay VIDEO --target-duration 8m
@@ -47,7 +53,11 @@ obscript split compress essay VIDEO --target-duration 8m
 
 A source may be a video URL, playlist URL, local media file, transcript directory, or `.txt`, `.srt`, `.vtt`, or `ytstt` `.json` transcript.
 
-Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls.
+Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
+
+Every approved script also produces `creative-direction.md`, an Obsidian-readable `storybook.md`, and the structured `storybook.yaml`. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. `--render` creates silent animations through the installed `$hyperframes` skill; it does not change the approved narration. Rendering uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
+
+The workflow is script → timed animations → human voiceover and audio editing. Obscript generates no audio, TTS, music, sound effects, or automatic subtitles. Storybook timestamps define the animation timeline and the human recording cues; production never retimes scenes against generated speech.
 
 Each stage uses the model configured in Codex and `medium` reasoning effort by default. Override these with `--model` and `--reasoning-effort` when needed.
 
@@ -66,11 +76,39 @@ knowledge.yaml
 plan.md
 script.md
 review.yaml
+creative-direction.md
+storybook.md              # readable scene plan for Obsidian
+storybook.yaml            # structured production plan
+production/               # only with --render
+  scenes/scene-001/
+    manifest.json
+    ...silent rendered scene media...
+    hyperframes/          # editable composition project
+production.yaml           # only after a render attempt
+video.mp4                 # silent animations, only after verified assembly
 run.yaml
 .obscript/                 # exact JSON stage state and prompts
 ```
 
-Split runs place `split-plan.yaml` at the project root and the five primary artifacts under `video-01/`, `video-02/`, and so on. Independent playlist runs use the same child layout plus `playlist-plan.yaml`. If the last review still requests revision, artifacts remain available and the CLI exits with status 2.
+A normal run or remix is one production unit. Split runs place `split-plan.yaml` at the project root; each `video-01/`, `video-02/`, and so on owns its knowledge, plan, script, review, visual artifacts, production files, and `.obscript/` state. Independent playlists use the same child layout plus `playlist-plan.yaml`.
+
+If the last script review still requests revision, `script.md` and `review.yaml` remain available and the CLI exits with status 2. No visual stages or rendering run for that unit. Application validation rejects invented, missing, duplicated, or reordered voiceover; unknown or uncovered sections; nonsequential scenes; and gaps, overlaps, or incorrect timeline endpoints. Invalid storybooks are regenerated up to three times, with attempts and validation errors retained in `.obscript/`; continued failure exits with status 1 before production and leaves `storybook.md` marked `status: invalid`, including the last draft and its validation error. Successful plans use `status: validated`.
+
+The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The creative direction JSON supplies the visual identity; `creative-direction.md` documents it. `storybook.md` displays the complete scene plan: timeline, exact narration reference, composition, visual elements, on-screen text, motion, transitions, assets, and render briefs. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
+
+Rendering processes scenes sequentially through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the complete direction and scene, immutable narration reference, planned timestamps, output directory, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The producer initializes an editable project under each scene directory and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+
+Each scene is verified with ffprobe: it must contain video, contain no audio track, and match its planned duration within one frame. It gets a durable manifest before the next scene runs. Final assembly places scenes at the exact storybook timestamps and applies visual transitions inside those allocated intervals, preserving the planned total duration. Only a verified complete assembly publishes the silent `video.mp4`. `production.yaml` records `backend: hyperframes`, `audio: false`, and `status: complete` or `status: failed`; failures preserve partial scene output and leave `final_video` empty. The CLI exits with status 1 for production failures.
+
+For example, a human sees this cue in `script.md` and records the exact passage for that animation interval:
+
+```markdown
+### scene-001 · 00:00:00.000 → 00:00:03.000
+
+Você observa o padrão.
+```
+
+Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates direction, storybook, and production; a direction change invalidates storybook and production; a storybook change invalidates production. Production checks that its upstream inputs and completed scene artifacts remain unchanged. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
 
 ## Skills
 
@@ -79,7 +117,7 @@ The versioned skill set is:
 ```text
 analyze-source      remix       compress      topics      plan-script
 translate-context   split       extend        essay       write-script
-review-script
+review-script       creative-direction       storybook       produce-video
 ```
 
 They can be invoked directly in Codex (for example, `$review-script`) or are loaded explicitly by the CLI for their respective stage. `translate-context` is an internal/import repair skill because ordinary analysis already emits canonical PT-BR knowledge.
@@ -91,4 +129,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 -m compileall -q src
 ```
 
-Structured-output schemas live in `schemas/`; the CLI invokes `codex exec --output-schema` in a read-only sandbox and performs all artifact writes itself.
+Structured-output schemas live in `schemas/`. Reasoning stages use `CodexAgent` with `codex exec --output-schema` in a read-only sandbox; the application writes their returned artifacts. Media execution uses a separate `ProductionAgent` with a workspace-write sandbox rooted at the scene directory (or production directory for assembly), no structured-output schema, and network access for HyperFrames dependencies and specified visual assets. This follows the [official Codex sandbox configuration](https://learn.chatgpt.com/docs/security). Production requests, prompts, responses, and executor logs remain local for inspection.
+
+The tests use a simulated HyperFrames executor, verify exact script-to-scene coverage and human timestamp cues, reject scene and final-duration drift, and exercise real local silent video assembly when FFmpeg tools are available. No live model-driven HyperFrames render runs in the test suite.

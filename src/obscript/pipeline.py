@@ -7,10 +7,14 @@ from pathlib import Path
 from .codex_agent import CodexAgent
 from .contracts import ContractError, choose_target_duration
 from .models import CommandSpec, RuntimeConfig, SourceAsset
+from .production import ProductionAgent, invalidate_downstream, validate_storybook, validate_structure
 from .storage import (
     copy_if_present,
+    read_json,
+    render_creative_direction,
     render_plan,
     render_script,
+    render_storybook,
     slugify,
     unique_directory,
     write_json,
@@ -24,6 +28,16 @@ class PipelineResult:
     project_root: Path
     outputs: tuple[Path, ...]
     passed_review: bool
+
+
+@dataclass(frozen=True)
+class ApprovedScript:
+    script: dict
+    script_path: Path
+    knowledge_path: Path
+    plan_path: Path
+    review_path: Path
+    target_seconds: int
 
 
 class Pipeline:
@@ -68,6 +82,7 @@ class Pipeline:
                 "format": spec.format,
                 "target_duration_seconds": spec.target_duration_seconds,
                 "split_count": spec.split_count,
+                "render": spec.render,
                 "sources": list(spec.sources),
                 "agent": "Codex CLI",
                 "model": self.config.model or "configured default",
@@ -185,9 +200,21 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         all_passed = True
         for unit_dir, unit_knowledge in units:
             unit_dir.mkdir(parents=True, exist_ok=True)
-            passed = self._produce_script(agent, spec, unit_dir, unit_knowledge)
+            unit_agent = agent if unit_dir == project_root else CodexAgent(
+                executable=self.config.codex, repo_root=self.config.repo_root,
+                project_root=unit_dir, model=self.config.model,
+                reasoning_effort=self.config.reasoning_effort, verbose=self.config.verbose,
+            )
+            approved = self._produce_script(unit_agent, spec, unit_dir, unit_knowledge)
             outputs.append(unit_dir / "script.md")
-            all_passed = all_passed and passed
+            all_passed = all_passed and approved is not None
+            if approved is not None:
+                _, direction_path = self._create_creative_direction(unit_agent, spec, unit_dir, approved)
+                storybook, storybook_path = self._create_storybook(unit_agent, unit_dir, approved, direction_path)
+                outputs.extend([unit_dir / "creative-direction.md", unit_dir / "storybook.md", unit_dir / "storybook.yaml"])
+                if spec.render:
+                    outputs.append(self._produce_video(unit_dir, approved, direction_path, storybook_path))
+                    outputs.append(unit_dir / "production.yaml")
         return PipelineResult(project_root, tuple(outputs), all_passed)
 
     def _transform_knowledge(
@@ -291,7 +318,8 @@ Return findings only; do not rewrite the script.""",
         spec: CommandSpec,
         unit_dir: Path,
         pipeline_knowledge: dict,
-    ) -> bool:
+    ) -> ApprovedScript | None:
+        invalidate_downstream(unit_dir, "script")
         state = unit_dir / ".obscript"
         state.mkdir(parents=True, exist_ok=True)
         pipeline_path = state / "pipeline-knowledge.json"
@@ -337,7 +365,17 @@ Return findings only; do not rewrite the script.""",
             )
             write_yaml(unit_dir / "review.yaml", final_review)
             if final_review["verdict"] == "pass":
-                return True
+                if script["metadata"]["target_duration_seconds"] != target_seconds:
+                    raise ContractError("approved script target differs from planned duration")
+                approved_path = state / "approved-script.json"
+                knowledge_path = state / "knowledge.json"
+                approved_plan_path = state / "plan.json"
+                approved_review_path = state / "review.json"
+                write_json(approved_path, script)
+                write_json(knowledge_path, formatted_knowledge)
+                write_json(approved_plan_path, plan)
+                write_json(approved_review_path, final_review)
+                return ApprovedScript(script, approved_path, knowledge_path, approved_plan_path, approved_review_path, target_seconds)
             if review_number == self.config.review_passes:
                 break
 
@@ -381,4 +419,77 @@ Return findings only; do not rewrite the script.""",
                 feedback_path=review_path,
             )
             (unit_dir / "script.md").write_text(render_script(script), encoding="utf-8")
-        return False
+        return None
+
+    def _create_creative_direction(
+        self, agent: CodexAgent, spec: CommandSpec, unit_dir: Path, approved: ApprovedScript,
+    ) -> tuple[dict, Path]:
+        invalidate_downstream(unit_dir, "creative-direction")
+        (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
+        direction, _ = agent.run(
+            stage="creative-direction", skill="creative-direction", schema="creative-direction",
+            prompt=f"""Establish one original visual identity from knowledge {approved.knowledge_path},
+plan {approved.plan_path}, and approved structured script {approved.script_path}.
+Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
+Format: {spec.format}. Pipeline: {spec.pipeline}.
+Commit to one direction in every field, with no alternatives. Narration is immutable.
+Specify silent animations only; a human will record and handle all audio outside this pipeline.
+Use supporting on-screen text without automatic subtitles.
+Do not reproduce the source video's identity. Do not invoke HyperFrames or generate media.""",
+        )
+        validate_structure(direction, read_json(self.config.repo_root / "schemas/creative-direction.schema.json"))
+        path = unit_dir / ".obscript/creative-direction.json"
+        write_json(path, direction)
+        (unit_dir / "creative-direction.md").write_text(render_creative_direction(direction), encoding="utf-8")
+        return direction, path
+
+    def _create_storybook(
+        self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
+        direction_path: Path,
+    ) -> tuple[dict, Path]:
+        invalidate_downstream(unit_dir, "storybook")
+        (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
+        feedback = ""
+        # A bounded retry prevents endless planning; all attempts and errors remain inspectable.
+        for attempt in range(1, 4):
+            storybook, _ = agent.run(
+                stage=f"storybook-{attempt:02d}", skill="storybook", schema="storybook",
+                prompt=f"""Create the complete storybook from approved structured script {approved.script_path},
+creative direction {direction_path}, and plan {approved.plan_path}.
+Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
+Cover every narration word exactly once in original section order, as contiguous exact excerpts.
+No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
+Production is silent animations only. Narration excerpts are timing references for a human reader.
+Do not request audio, TTS, music, sound effects, or automatic subtitles. Scene timestamps govern rendering.
+Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
+            )
+            try:
+                self._validate_storybook(approved, storybook)
+            except ContractError as exc:
+                (unit_dir / "storybook.md").write_text(
+                    render_storybook(storybook, approved.script, validation_error=str(exc)), encoding="utf-8",
+                )
+                error_path = unit_dir / ".obscript" / f"storybook-{attempt:02d}.validation.json"
+                write_json(error_path, {"status": "invalid", "error": str(exc)})
+                feedback = f"Previous attempt was rejected by application validation: {exc}. Correct this defect and return the complete storybook."
+                if attempt == 3:
+                    raise ContractError(f"Storybook remained invalid after 3 attempts: {exc}; inspect {unit_dir / 'storybook.md'}") from exc
+                continue
+            path = unit_dir / ".obscript/storybook.json"
+            write_json(path, storybook)
+            write_yaml(unit_dir / "storybook.yaml", storybook)
+            (unit_dir / "storybook.md").write_text(render_storybook(storybook, approved.script), encoding="utf-8")
+            (unit_dir / "script.md").write_text(render_script(approved.script, storybook), encoding="utf-8")
+            return storybook, unit_dir / "storybook.yaml"
+        raise AssertionError("unreachable")
+
+    def _validate_storybook(self, approved: ApprovedScript, storybook: dict) -> None:
+        validate_storybook(approved.script, storybook, approved.target_seconds)
+
+    def _produce_video(
+        self, unit_dir: Path, approved: ApprovedScript, direction_path: Path, storybook_path: Path,
+    ) -> Path:
+        return ProductionAgent(self.config, unit_dir).produce(
+            script_path=approved.script_path, direction_path=direction_path,
+            storybook_path=storybook_path, review_path=approved.review_path,
+        )

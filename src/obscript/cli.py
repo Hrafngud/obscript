@@ -10,13 +10,14 @@ from .codex_agent import CodexError
 from .contracts import ContractError, parse_command_tokens
 from .models import RuntimeConfig
 from .pipeline import Pipeline
+from .production import ProductionError
 from .transcribe import TranscriptionError
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="obscript",
-        description="Generate original PT-BR video scripts through a composable Codex pipeline.",
+        description="Generate original PT-BR scripts, visual pre-production, and optional silent HyperFrames animations.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""ordered grammar:
   obscript [remix|split] [compress|extend] [topics|essay] <source>
@@ -27,6 +28,7 @@ examples:
   obscript remix extend topics VIDEO_A,VIDEO_B
   obscript split compress essay VIDEO --target-duration 8m
   obscript split topics VIDEO --into 4
+  obscript extend essay VIDEO --render
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
 is mandatory and has no translate modifier.
@@ -92,6 +94,10 @@ is mandatory and has no translate modifier.
         action="store_true",
         help="validate and print the execution stages without transcribing or invoking Codex",
     )
+    parser.add_argument(
+        "--render", action="store_true",
+        help="render silent animations through the installed HyperFrames skill",
+    )
     parser.add_argument("--verbose", action="store_true", help="stream Codex CLI output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -114,7 +120,9 @@ def _print_dry_run(spec) -> None:
         stages.append(spec.time_controller)
     if spec.format != "source":
         stages.append(spec.format)
-    stages.extend(["plan-script", "write-script", "review-script"])
+    stages.extend(["plan-script", "write-script", "review-script", "creative-direction", "storybook", "validate-storybook"])
+    if spec.render:
+        stages.extend(["produce-video", "package-production"])
     print("pipeline: " + " → ".join(stages))
     print(f"sources: {len(spec.sources)}")
     print(f"target_duration_seconds: {spec.target_duration_seconds or 'automatic'}")
@@ -130,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             args.command,
             target_duration=args.target_duration,
             split_count=args.into,
+            render=args.render,
         )
         if args.review_passes < 1:
             raise ContractError("--review-passes must be at least 1")
@@ -156,13 +165,13 @@ def main(argv: list[str] | None = None) -> int:
             verbose=args.verbose,
         )
         result = Pipeline(config).run(spec)
-    except (ContractError, TranscriptionError, CodexError, OSError) as exc:
+    except (ContractError, TranscriptionError, CodexError, ProductionError, OSError) as exc:
         print(f"obscript: {exc}", file=sys.stderr)
         return 1
 
     print(f"[obscript] projeto: {result.project_root}")
     for output in result.outputs:
-        print(f"[obscript] roteiro: {output}")
+        print(f"[obscript] artefato: {output}")
     if not result.passed_review:
         print(
             "[obscript] aviso: o roteiro foi salvo, mas ainda requer revisão; consulte review.yaml",
