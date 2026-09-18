@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+import hashlib
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 from .codex_agent import CodexAgent
 from .contracts import ContractError, choose_target_duration
-from .models import CommandSpec, RuntimeConfig, SourceAsset
+from .models import CommandSpec, RuntimeConfig
+from .projects import create_project, find_project, update_project
 from .production import ProductionAgent, invalidate_downstream, validate_storybook
 from .storage import (
     copy_if_present,
+    file_sha256,
     read_json,
+    read_yaml,
     read_creative_direction,
     creative_direction_reference,
     render_plan,
@@ -47,30 +52,39 @@ class Pipeline:
         self.config = config
 
     def run(self, spec: CommandSpec) -> PipelineResult:
-        direction_path = self.config.creative_direction_path
-        direction = read_creative_direction(direction_path)
-        assets: list[SourceAsset] = []
-        for source in spec.sources:
-            print(f"[obscript] preparando fonte: {source}", flush=True)
-            assets.extend(
-                ingest_source(
-                    source,
-                    ytstt=self.config.ytstt,
-                    transcripts_dir=self.config.transcripts_dir,
-                    cookies_from_browser=self.config.cookies_from_browser,
-                    cookies=self.config.cookies,
-                )
+        if spec.project_id:
+            project_root = find_project(self.config.output_dir, spec.project_id)
+            if project_root is None:
+                raise ContractError(f"Project not found: {spec.project_id}")
+        else:
+            name = self.config.project_name or Path(spec.sources[0]).stem
+            project_root = unique_directory(
+                self.config.output_dir,
+                slugify(name, datetime.now().strftime("video-%Y%m%d-%H%M%S")),
             )
-        if spec.pipeline == "remix" and len(assets) < 2:
-            raise ContractError("remix requires at least two videos after source expansion")
-        if spec.pipeline == "split" and len(assets) != 1:
-            raise ContractError("split requires one video, but the source expanded to a playlist")
+            create_project(project_root, spec, self.config.creative_direction_path)
+        print(f"[obscript] project ID: {read_json(project_root / 'project.json')['id']}", flush=True)
+        print(f"[obscript] projeto: {project_root}", flush=True)
+        update_project(project_root)
+        try:
+            result = self._run(spec, project_root)
+        except Exception as exc:
+            update_project(project_root, status="failed", error=str(exc))
+            raise
+        phase = "render" if spec.render else "storybook" if spec.storybook else "script"
+        update_project(project_root, phase=phase if result.passed_review else None,
+                       status="complete" if result.passed_review else "needs_review",
+                       creative_direction=self.config.creative_direction_path)
+        return result
 
-        name = self.config.project_name or assets[0].title
-        project_root = unique_directory(
-            self.config.output_dir,
-            slugify(name, datetime.now().strftime("video-%Y%m%d-%H%M%S")),
-        )
+    def _run(self, spec: CommandSpec, project_root: Path) -> PipelineResult:
+        direction_path = self.config.creative_direction_path
+        direction = read_creative_direction(direction_path) if spec.storybook or spec.render else None
+        sources = self._import_sources(spec, project_root)
+        if spec.pipeline == "remix" and len(sources) < 2:
+            raise ContractError("remix requires at least two videos after source expansion")
+        if spec.pipeline == "split" and len(sources) != 1:
+            raise ContractError("split requires one video, but the source expanded to a playlist")
         agent = CodexAgent(
             executable=self.config.codex,
             repo_root=self.config.repo_root,
@@ -82,14 +96,16 @@ class Pipeline:
         write_yaml(
             project_root / "run.yaml",
             {
-                "created_at": datetime.now().astimezone().isoformat(),
+                "project_id": read_json(project_root / "project.json")["id"],
+                "created_at": read_json(project_root / "project.json")["created_at"],
                 "pipeline": spec.pipeline,
                 "time_controller": spec.time_controller,
                 "format": spec.format,
                 "target_duration_seconds": spec.target_duration_seconds,
                 "split_count": spec.split_count,
                 "render": spec.render,
-                "creative_direction": creative_direction_reference(direction_path, direction),
+                "storybook": spec.storybook,
+                "creative_direction": creative_direction_reference(direction_path, direction) if direction else None,
                 "sources": list(spec.sources),
                 "agent": "Codex CLI",
                 "model": self.config.model or "configured default",
@@ -98,32 +114,23 @@ class Pipeline:
         )
 
         analyses: list[dict] = []
-        for index, asset in enumerate(assets, 1):
-            source_dir = project_root / "sources" / f"source-{index:02d}-{slugify(asset.title)}"
-            source_dir.mkdir(parents=True)
-            transcript_txt = copy_if_present(asset.transcript_txt, source_dir / "transcript.txt")
-            transcript_srt = copy_if_present(asset.transcript_srt, source_dir / "transcript.srt")
-            transcript_json = copy_if_present(asset.transcript_json, source_dir / "transcript.json")
-            source_manifest = {
-                "id": f"source-{index:02d}",
-                "title": asset.title,
-                "source": asset.original,
-                "language": asset.language,
-                "duration_seconds": round(asset.duration_seconds, 3),
-                "transcript_txt": str(transcript_txt),
-                "transcript_srt": str(transcript_srt) if transcript_srt else None,
-                "transcript_json": str(transcript_json) if transcript_json else None,
-            }
-            write_json(source_dir / "source.json", source_manifest)
-            analysis, analysis_path = agent.run(
-                stage=f"analyze-source-{index:02d}",
-                skill="analyze-source",
-                schema="knowledge",
-                prompt=f"""Analyze the transcript at {transcript_txt}.
+        for index, relative_dir in enumerate(sources, 1):
+            source_dir = project_root / relative_dir
+            transcript_txt = source_dir / "transcript.txt"
+            analysis_path = source_dir / "analysis.json"
+            if analysis_path.exists():
+                analysis = read_json(analysis_path)
+            else:
+                analysis, _ = agent.run(
+                    stage=f"analyze-source-{index:02d}",
+                    skill="analyze-source",
+                    schema="knowledge",
+                    prompt=f"""Analyze the transcript at {transcript_txt}.
 Source metadata is at {source_dir / 'source.json'}.
 Create a canonical PT-BR knowledge model. Set kind to single and narrative.format to source.
 Use stable topic IDs prefixed with source-{index:02d}/. Preserve factual qualifications and do not write narration.""",
-            )
+                )
+                write_json(analysis_path, analysis)
             analyses.append(analysis)
             write_yaml(source_dir / "analysis.yaml", analysis)
             print(f"[obscript] análise: {analysis_path}", flush=True)
@@ -131,13 +138,18 @@ Use stable topic IDs prefixed with source-{index:02d}/. Preserve factual qualifi
         if spec.pipeline == "remix":
             analyses_path = project_root / ".obscript" / "source-analyses.json"
             write_json(analyses_path, analyses)
-            knowledge, _ = agent.run(
-                stage="remix",
-                skill="remix",
-                schema="knowledge",
-                prompt=f"""Merge every knowledge model in {analyses_path} into one genuinely unified model.
+            remix_path = project_root / ".obscript/remix-knowledge.json"
+            if remix_path.exists():
+                knowledge = read_json(remix_path)
+            else:
+                knowledge, _ = agent.run(
+                    stage="remix",
+                    skill="remix",
+                    schema="knowledge",
+                    prompt=f"""Merge every knowledge model in {analyses_path} into one genuinely unified model.
 Set kind to remix. Deduplicate overlap, preserve provenance in source_refs, surface unresolved contradictions, and create a new defensible thesis.""",
-            )
+                )
+                write_json(remix_path, knowledge)
         else:
             knowledge = analyses[0]
 
@@ -154,15 +166,20 @@ Set kind to remix. Deduplicate overlap, preserve provenance in source_refs, surf
                 if spec.target_duration_seconds
                 else "Recommend a defensible duration for every part."
             )
-            split_result, _ = agent.run(
-                stage="split",
-                skill="split",
-                schema="split",
-                prompt=f"""Split the knowledge model at {knowledge_path} semantically, never by equal transcript intervals.
+            split_path = project_root / ".obscript/split-result.json"
+            if split_path.exists():
+                split_result = read_json(split_path)
+            else:
+                split_result, _ = agent.run(
+                    stage="split",
+                    skill="split",
+                    schema="split",
+                    prompt=f"""Split the knowledge model at {knowledge_path} semantically, never by equal transcript intervals.
 {count_instruction}
 {target_instruction}
 Each part must be a complete knowledge model with kind split and narrative.format source.""",
-            )
+                )
+                write_json(split_path, split_result)
             write_yaml(
                 project_root / "split-plan.yaml",
                 {
@@ -203,6 +220,10 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         else:
             units = [(project_root, knowledge)]
 
+        known_units = read_json(project_root / "project.json")["units"]
+        for unit_dir, _ in units:
+            if unit_dir.relative_to(project_root).as_posix() not in known_units:
+                update_project(project_root, phase="transcript", unit=unit_dir)
         outputs: list[Path] = []
         all_passed = True
         for unit_dir, unit_knowledge in units:
@@ -216,14 +237,55 @@ Each part must be a complete knowledge model with kind split and narrative.forma
             outputs.append(unit_dir / "script.md")
             all_passed = all_passed and approved is not None
             if approved is not None:
+                update_project(project_root, phase="script", unit=unit_dir)
+                if not (spec.storybook or spec.render):
+                    continue
                 if read_creative_direction(direction_path) != direction:
                     raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
-                storybook, storybook_path = self._create_storybook(unit_agent, unit_dir, approved, direction_path)
+                storybook, storybook_path = self._get_storybook(unit_agent, unit_dir, approved, direction_path, render=spec.render)
+                update_project(project_root, phase="storybook", unit=unit_dir)
                 outputs.extend([unit_dir / "storybook.md", unit_dir / "storybook.yaml"])
                 if spec.render:
                     outputs.append(self._produce_video(unit_dir, approved, direction_path, storybook_path))
                     outputs.append(unit_dir / "production.yaml")
+                    update_project(project_root, phase="render", unit=unit_dir)
         return PipelineResult(project_root, tuple(outputs), all_passed)
+
+    def _import_sources(self, spec: CommandSpec, project_root: Path) -> list[str]:
+        checkpoint = project_root / ".obscript/imports.json"
+        imports = read_json(checkpoint) if checkpoint.exists() else []
+        for source in spec.sources[len(imports):]:
+            print(f"[obscript] preparando fonte: {source}", flush=True)
+            assets = ingest_source(source, ytstt=self.config.ytstt,
+                                   transcripts_dir=self.config.transcripts_dir,
+                                   cookies_from_browser=self.config.cookies_from_browser,
+                                   cookies=self.config.cookies)
+            directories = []
+            count = sum(len(item) for item in imports)
+            for index, asset in enumerate(assets, count + 1):
+                source_dir = project_root / "sources" / f"source-{index:02d}-{slugify(asset.title)}"
+                source_dir.mkdir(parents=True, exist_ok=True)
+                txt = copy_if_present(asset.transcript_txt, source_dir / "transcript.txt")
+                srt = copy_if_present(asset.transcript_srt, source_dir / "transcript.srt")
+                data = copy_if_present(asset.transcript_json, source_dir / "transcript.json")
+                write_json(source_dir / "source.json", {
+                    "id": f"source-{index:02d}", "title": asset.title, "source": asset.original,
+                    "language": asset.language, "duration_seconds": round(asset.duration_seconds, 3),
+                    "transcript_txt": str(txt), "transcript_srt": str(srt) if srt else None,
+                    "transcript_json": str(data) if data else None,
+                })
+                directories.append(source_dir.relative_to(project_root).as_posix())
+            if not directories:
+                raise ContractError(f"No transcripts were imported from {source}")
+            imports.append(directories)
+            write_json(checkpoint, imports)
+        directories = [directory for group in imports for directory in group]
+        for directory in directories:
+            if not (project_root / directory / "transcript.txt").exists():
+                raise ContractError(f"Saved transcript is missing: {project_root / directory}")
+        if not read_json(project_root / "project.json")["units"]:
+            update_project(project_root, phase="transcript")
+        return directories
 
     def _transform_knowledge(
         self,
@@ -327,6 +389,22 @@ Return findings only; do not rewrite the script.""",
         unit_dir: Path,
         pipeline_knowledge: dict,
     ) -> ApprovedScript | None:
+        state = unit_dir / ".obscript"
+        approved_path = state / "approved-script.json"
+        if spec.project_id and approved_path.exists() and (state / "review.json").exists():
+            script = read_json(approved_path)
+            if read_json(state / "review.json")["verdict"] == "pass":
+                for name in ["knowledge.json", "plan.json"]:
+                    if not (state / name).exists():
+                        raise ContractError(f"Approved script checkpoint is incomplete: {state / name}")
+                receipt = state / "approved-inputs.json"
+                if not receipt.exists() or read_json(receipt) != self._approval_inputs(unit_dir, pipeline_knowledge):
+                    raise ContractError("Approved script inputs changed; restore the approved checkpoint before resuming")
+                if not (unit_dir / "script.md").exists():
+                    (unit_dir / "script.md").write_text(render_script(script), encoding="utf-8")
+                return ApprovedScript(script, approved_path, state / "knowledge.json",
+                                      state / "plan.json", state / "review.json",
+                                      script["metadata"]["target_duration_seconds"])
         invalidate_downstream(unit_dir, "script")
         state = unit_dir / ".obscript"
         state.mkdir(parents=True, exist_ok=True)
@@ -383,6 +461,7 @@ Return findings only; do not rewrite the script.""",
                 write_json(knowledge_path, formatted_knowledge)
                 write_json(approved_plan_path, plan)
                 write_json(approved_review_path, final_review)
+                write_json(state / "approved-inputs.json", self._approval_inputs(unit_dir, pipeline_knowledge))
                 return ApprovedScript(script, approved_path, knowledge_path, approved_plan_path, approved_review_path, target_seconds)
             if review_number == self.config.review_passes:
                 break
@@ -428,6 +507,49 @@ Return findings only; do not rewrite the script.""",
             )
             (unit_dir / "script.md").write_text(render_script(script), encoding="utf-8")
         return None
+
+    def _approval_inputs(self, unit_dir: Path, pipeline_knowledge: dict) -> dict:
+        return {
+            "files": {name: file_sha256(unit_dir / ".obscript" / name)
+                      for name in ["approved-script.json", "knowledge.json", "plan.json", "review.json"]},
+            "pipeline_knowledge": hashlib.sha256(json.dumps(pipeline_knowledge, sort_keys=True,
+                                                            ensure_ascii=False).encode()).hexdigest(),
+        }
+
+    def _get_storybook(
+        self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
+        direction_path: Path, *, render: bool = False,
+    ) -> tuple[dict, Path]:
+        path = unit_dir / "storybook.yaml"
+        reference = unit_dir / ".obscript/creative-direction-source.json"
+        if path.exists():
+            expected = creative_direction_reference(direction_path, read_creative_direction(direction_path))
+            if not reference.exists() or read_json(reference) != expected:
+                # An explicit storybook request can rebuild plans after standards change.
+                # Rendering must never silently replace a manually edited plan.
+                if not render:
+                    invalidate_downstream(unit_dir, "creative-direction")
+                    return self._create_storybook(agent, unit_dir, approved, direction_path)
+                raise ContractError("Shared creative direction changed after storybook planning; run PROJECT_ID --storybook before rendering")
+            storybook = read_yaml(path)
+            self._validate_storybook(approved, storybook)
+            previous_path = unit_dir / ".obscript/storybook.json"
+            if previous_path.exists():
+                previous = read_json(previous_path)
+                direction_link = Path(os.path.relpath(direction_path, unit_dir))
+                for name, old, new in [
+                    ("script.md", render_script(approved.script, previous), render_script(approved.script, storybook)),
+                    ("storybook.md", render_storybook(previous, approved.script, direction_path=direction_link),
+                     render_storybook(storybook, approved.script, direction_path=direction_link)),
+                ]:
+                    document = unit_dir / name
+                    if not document.exists() or document.read_text(encoding="utf-8") == old:
+                        if old != new or not document.exists():
+                            document.write_text(new, encoding="utf-8")
+                if previous != storybook:
+                    write_json(previous_path, storybook)
+            return storybook, path
+        return self._create_storybook(agent, unit_dir, approved, direction_path)
 
     def _create_storybook(
         self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
@@ -483,7 +605,19 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
     def _produce_video(
         self, unit_dir: Path, approved: ApprovedScript, direction_path: Path, storybook_path: Path,
     ) -> Path:
-        return ProductionAgent(self.config, unit_dir).produce(
+        receipt_path = unit_dir / ".obscript/production-inputs.json"
+        inputs = {str(path.relative_to(unit_dir)) if path.is_relative_to(unit_dir) else str(path):
+                  file_sha256(path)
+                  for path in [approved.script_path, approved.review_path, direction_path, storybook_path]}
+        video = unit_dir / "video.mp4"
+        if receipt_path.exists() and video.exists() and (unit_dir / "production.yaml").exists():
+            receipt = read_json(receipt_path)
+            if (receipt.get("inputs") == inputs and read_yaml(unit_dir / "production.yaml").get("status") == "complete"
+                    and receipt.get("video_sha256") == file_sha256(video)):
+                return video
+        result = ProductionAgent(self.config, unit_dir).produce(
             script_path=approved.script_path, direction_path=direction_path,
             storybook_path=storybook_path, review_path=approved.review_path,
         )
+        write_json(receipt_path, {"inputs": inputs, "video_sha256": file_sha256(result)})
+        return result

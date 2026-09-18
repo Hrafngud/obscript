@@ -13,6 +13,8 @@ class CommandSpec:
     target_duration_seconds: int | None = None
     split_count: int | None = None
     render: bool = False
+    storybook: bool = False
+    project_id: str | None = None
 
 
 @dataclass(frozen=True)

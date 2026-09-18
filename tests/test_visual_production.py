@@ -14,6 +14,7 @@ from obscript.cli import main
 from obscript.contracts import ContractError, parse_command_tokens
 from obscript.models import RuntimeConfig, SourceAsset
 from obscript.pipeline import Pipeline
+from obscript.projects import resume_spec
 from obscript.production import ProductionAgent, ProductionError, invalidate_downstream, probe_media, validate_storybook
 from obscript.storage import creative_direction_reference, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
 
@@ -217,12 +218,116 @@ class PipelineVisualTests(unittest.TestCase):
         FakePlanningAgent.invalid_storybooks = 0
         self.addCleanup(patch.stopall)
         patch("obscript.pipeline.CodexAgent", FakePlanningAgent).start()
-        patch("obscript.pipeline.ingest_source", return_value=[self.asset]).start()
+        self.ingest = patch("obscript.pipeline.ingest_source", return_value=[self.asset]).start()
         self.producer = patch("obscript.pipeline.ProductionAgent").start()
+        def fake_produce(**kwargs):
+            unit = kwargs["storybook_path"].parent
+            path = unit / "video.mp4"
+            path.write_bytes(b"verified video fixture")
+            write_yaml(unit / "production.yaml", {"status": "complete"})
+            return path
+        self.producer.return_value.produce.side_effect = fake_produce
         patch("sys.stdout", new=io.StringIO()).start()
 
-    def run_pipeline(self, tokens=None, render=False):
-        return Pipeline(config_fixture(self.root)).run(parse_command_tokens(tokens or ["source"], render=render))
+    def run_pipeline(self, tokens=None, render=False, storybook=True):
+        return Pipeline(config_fixture(self.root)).run(parse_command_tokens(tokens or ["source"], render=render, storybook=storybook))
+
+    def resume(self, root, *, storybook=False, render=False):
+        return Pipeline(config_fixture(self.root)).run(resume_spec(root, storybook=storybook, render=render))
+
+    def test_default_stops_after_script_without_visual_standards(self):
+        self.direction.unlink()
+        result = self.run_pipeline(storybook=False)
+        self.assertTrue(result.passed_review)
+        self.assertEqual([path.name for path in result.outputs], ["script.md"])
+        self.assertFalse((result.project_root / "storybook.yaml").exists())
+        self.assertEqual(read_json(result.project_root / "project.json")["phase"], "script")
+        self.producer.assert_not_called()
+
+    def test_resume_script_to_storybook_reuses_upstream(self):
+        result = self.run_pipeline(storybook=False)
+        identity = read_json(result.project_root / "project.json")["id"]
+        FakePlanningAgent.calls.clear()
+        resumed = self.resume(result.project_root, storybook=True)
+        self.assertEqual(resumed.project_root, result.project_root)
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.ingest.assert_called_once()
+        self.producer.assert_not_called()
+        self.assertEqual(read_json(result.project_root / "project.json")["id"], identity)
+        self.assertEqual(read_json(result.project_root / "project.json")["phase"], "storybook")
+
+    def test_resume_manual_storybook_then_skip_completed_render(self):
+        result = self.run_pipeline()
+        story = story_fixture()
+        story["scenes"][0]["render_brief"] = "Manual visual revision"
+        write_yaml(result.project_root / "storybook.yaml", story)
+        (result.project_root / "storybook.md").write_text("My manual notes")
+        FakePlanningAgent.calls.clear()
+        self.resume(result.project_root, render=True)
+        self.assertFalse(FakePlanningAgent.calls)
+        self.assertEqual(load_yaml(self.producer.return_value.produce.call_args.kwargs["storybook_path"]), story)
+        self.assertEqual((result.project_root / "storybook.md").read_text(), "My manual notes")
+        self.resume(result.project_root, render=True)
+        self.producer.return_value.produce.assert_called_once()
+        story["scenes"][0]["render_brief"] = "Second manual revision"
+        write_yaml(result.project_root / "storybook.yaml", story)
+        self.resume(result.project_root, render=True)
+        self.assertEqual(self.producer.return_value.produce.call_count, 2)
+        self.ingest.assert_called_once()
+
+    def test_invalid_manual_storybook_is_preserved_and_blocks_render(self):
+        result = self.run_pipeline()
+        story = story_fixture()
+        story["scenes"][0]["voiceover"]["text"] = "Unapproved narration"
+        write_yaml(result.project_root / "storybook.yaml", story)
+        FakePlanningAgent.calls.clear()
+        with self.assertRaisesRegex(ContractError, "voiceover differs"):
+            self.resume(result.project_root, render=True)
+        self.assertEqual(load_yaml(result.project_root / "storybook.yaml"), story)
+        self.assertFalse(FakePlanningAgent.calls)
+        self.producer.assert_not_called()
+        self.assertEqual(read_json(result.project_root / "project.json")["status"], "failed")
+
+    def test_resume_transcript_checkpoint_after_analysis_failure(self):
+        with patch.object(FakePlanningAgent, "run", side_effect=RuntimeError("analysis failed")):
+            with self.assertRaisesRegex(RuntimeError, "analysis failed"):
+                self.run_pipeline(storybook=False)
+        root = self.root / "outputs/teste"
+        self.assertEqual(read_json(root / "project.json")["phase"], "transcript")
+        self.transcript.unlink()
+        result = self.resume(root, storybook=True)
+        self.assertTrue(result.passed_review)
+        self.ingest.assert_called_once()
+
+    def test_resume_split_and_playlist_projects(self):
+        for tokens, playlist in [(["split", "source"], False), (["source"], True)]:
+            with self.subTest(tokens=tokens):
+                self.ingest.return_value = [self.asset, self.asset] if playlist else [self.asset]
+                result = self.run_pipeline(tokens, storybook=False)
+                FakePlanningAgent.calls.clear()
+                self.resume(result.project_root, storybook=True)
+                self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "storybook-01"])
+                for number in [1, 2]:
+                    self.assertTrue((result.project_root / f"video-{number:02d}/storybook.yaml").exists())
+
+    def test_direction_change_blocks_render_until_storybook_rebuilt(self):
+        result = self.run_pipeline()
+        self.direction.write_text("# Changed standards")
+        with self.assertRaisesRegex(ContractError, "changed after storybook"):
+            self.resume(result.project_root, render=True)
+        self.producer.assert_not_called()
+        self.resume(result.project_root, storybook=True)
+        self.resume(result.project_root, render=True)
+        self.producer.return_value.produce.assert_called_once()
+
+    def test_approved_script_edit_cannot_reuse_its_old_review(self):
+        result = self.run_pipeline(storybook=False)
+        script = script_fixture()
+        script["sections"][0]["narration"] = "Unreviewed replacement"
+        write_json(result.project_root / ".obscript/approved-script.json", script)
+        with self.assertRaisesRegex(ContractError, "Approved script inputs changed"):
+            self.resume(result.project_root, render=True)
+        self.producer.assert_not_called()
 
     def test_long_on_screen_text_does_not_trigger_retries(self):
         original_run = FakePlanningAgent.run
@@ -241,7 +346,7 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertIn(label, (result.project_root / "storybook.md").read_text())
         self.assertTrue((result.project_root / "storybook.yaml").exists())
 
-    def test_default_preproduction_without_media_calls(self):
+    def test_storybook_preproduction_without_media_calls(self):
         result = self.run_pipeline()
         self.assertTrue(result.passed_review)
         self.assertEqual([path.name for path in result.outputs], ["script.md", "storybook.md", "storybook.yaml"])
@@ -277,7 +382,7 @@ class PipelineVisualTests(unittest.TestCase):
         custom = self.root / "Shared standards.md"
         custom.write_text("## Identity\n\n**Typography:** \n**Motion:** \n")
         config = replace(config_fixture(self.root), creative_direction=custom)
-        result = Pipeline(config).run(parse_command_tokens(["source"]))
+        result = Pipeline(config).run(parse_command_tokens(["source"], storybook=True))
         reference = read_json(result.project_root / ".obscript/creative-direction-source.json")
         self.assertEqual(reference["path"], str(custom))
         self.assertIn("(<../../Shared standards.md>)", (result.project_root / "storybook.md").read_text())
@@ -407,6 +512,8 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(request["hyperframes"]["project_directory"], str(output_dir / "hyperframes"))
         for scene, output in zip(request["storybook"]["scenes"], request["scene_outputs"]):
             self.assertEqual(output["scene_id"], scene["id"])
+            if output.get("reuse_existing"):
+                continue
             if scene["id"] == self.failure:
                 raise ProductionError("Synthetic backend failure")
             if scene["id"] == self.missing_scene:
@@ -473,6 +580,38 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertIsNone(manifest["final_video"])
         self.assertFalse((self.root / "video.mp4").exists())
         self.assertEqual(self.calls, ["produce-video"])
+
+    def test_retry_reuses_verified_completed_scenes(self):
+        self.failure = "scene-002"
+        with self.assertRaises(ProductionError):
+            self.patched_produce()
+        self.failure = None
+        original_executor = self.execute_fixture
+        def retry(stage, request_path, output_dir):
+            request = read_json(request_path)
+            self.assertEqual([item["reuse_existing"] for item in request["scene_outputs"]], [True, False, False, False])
+            self.assertEqual(read_json(Path(request["scene_outputs"][0]["manifest"]))["status"], "complete")
+            original_executor(stage, request_path, output_dir)
+        with patch.object(self.agent, "_execute", side_effect=retry), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.produce()
+        self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
+        self.assertFalse((self.root / ".obscript/invalidated").exists())
+
+    def test_changed_render_inputs_archive_partial_work(self):
+        self.failure = "scene-002"
+        with self.assertRaises(ProductionError):
+            self.patched_produce()
+        story = story_fixture()
+        story["scenes"][0]["render_brief"] = "Changed plan"
+        write_json(self.paths["storybook"], story)
+        def changed_executor(stage, request_path, output_dir):
+            request = read_json(request_path)
+            self.assertFalse(any(item["reuse_existing"] for item in request["scene_outputs"]))
+            raise ProductionError("Stop after checking handoff")
+        with patch.object(self.agent, "_execute", side_effect=changed_executor), patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaises(ProductionError):
+                self.produce()
+        self.assertTrue(list((self.root / ".obscript/invalidated").rglob("scene.mp4")))
 
     def test_assembly_failure_never_publishes_final_video(self):
         self.failure = "assembly"

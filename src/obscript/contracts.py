@@ -54,6 +54,7 @@ def parse_command_tokens(
     target_duration: str | None = None,
     split_count: int | None = None,
     render: bool = False,
+    storybook: bool = False,
 ) -> CommandSpec:
     if not tokens:
         raise ContractError("a source is required")
@@ -103,6 +104,7 @@ def parse_command_tokens(
         target_duration_seconds=target_seconds,
         split_count=split_count,
         render=render,
+        storybook=storybook,
     )
 
 

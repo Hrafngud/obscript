@@ -31,7 +31,8 @@ class CodexAgent:
         self.verbose = verbose
         self.state_dir = project_root / ".obscript"
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self._counter = 0
+        counters = [path.name.partition("-")[0] for path in self.state_dir.glob("*.json")]
+        self._counter = max((int(value) for value in counters if value.isdigit()), default=0)
 
     def _resolved_schema(self, schema_name: str) -> Path:
         source = self.repo_root / "schemas" / f"{schema_name}.schema.json"

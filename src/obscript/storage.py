@@ -51,7 +51,15 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ContractError(f"Invalid JSON at {path}: {exc}") from exc
+
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def write_yaml(path: Path, data: Any) -> None:
@@ -73,7 +81,10 @@ def read_yaml(path: Path) -> Any:
         import yaml  # type: ignore
     except ImportError:
         return read_json(path)
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ContractError(f"Invalid YAML at {path}: {exc}") from exc
 
 
 def copy_if_present(source: Path | None, destination: Path) -> Path | None:

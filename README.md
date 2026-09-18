@@ -6,6 +6,7 @@
 source → analyze-source → pipeline → time → format
        → plan-script → write-script → review-script
                                       ↓ pass
+                                      ↓ --storybook or --render
        → storybook → validate-storybook
                                       ↓ --render
        → produce-video → package-production
@@ -43,11 +44,14 @@ Examples:
 obscript VIDEO
 obscript compress essay VIDEO
 obscript extend topics VIDEO --target-duration 20m
+obscript extend essay VIDEO --storybook
 obscript extend essay VIDEO --render
 obscript extend essay VIDEO --render --dry-run
 obscript remix compress essay 'VIDEO_A,VIDEO_B,VIDEO_C' --target-duration 12m
 obscript split topics VIDEO --into 4
 obscript split compress essay VIDEO --target-duration 8m
+obscript PROJECT_ID --storybook
+obscript PROJECT_ID --render
 ```
 
 `remix` takes two or more comma-separated sources. A playlist URL is accepted as the single remix argument when `ytstt` expands it into at least two videos. A playlist without `remix` produces one independent script per item. `split` takes one non-playlist video. Translation is always conceptual PT-BR normalization during `analyze-source`; there is no `translate` modifier.
@@ -75,7 +79,13 @@ Set `OBSCRIPT_COOKIES_FROM_BROWSER=firefox` in your shell to persist a preferenc
 
 Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
 
-Every approved script also produces an Obsidian-readable `storybook.md` and the structured `storybook.yaml`. Planning and production both read the same shared `Globals/creative-direction.md`; no per-video creative-direction file or identity-generation stage is created. Use `--creative-direction FILE` to select another shared file, including when using a different `--output-dir` or `--vault`. The shared file must exist and contain standards or a field template before a run; dry runs do not read it. Filled fields are binding; blank fields and suggestions remain unspecified, with execution details resolved in each scene plan. Obscript never edits the shared file. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. `--render` creates silent animations through the installed `$hyperframes` skill; it does not change the approved narration. Rendering uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
+Without a phase flag, a run stops after script review. `--storybook` continues through visual planning and validation, producing an Obsidian-readable `storybook.md` and the structured `storybook.yaml`, without rendering. `--render` runs any missing script and storybook phases, then creates silent animations through the installed `$hyperframes` skill. These flags are mutually exclusive.
+
+Each new project has a permanent UUID in `project.json`, printed before processing starts. Resume with `obscript PROJECT_ID --storybook` or `obscript PROJECT_ID --render`; use the same `--output-dir` or `--vault` as the original run. The project keeps its sources, modifiers, target duration, split settings, and shared direction path. Completed imports, analyses, remix/split results, approved scripts, validated storybooks, and unchanged completed renders are reused. Failed runs keep their checkpoints and ID, including projects that only reached transcript import. Split and independent playlist projects resume each child video in the same project. Running the original source again creates a separate project; ID lookup applies to projects created with this metadata.
+
+For manual visual edits, change `storybook.yaml`, the authoritative production plan. Resuming revalidates it without regenerating it, including its exact narration and timing constraints. Invalid edits remain available for correction and block rendering. `storybook.md` is the readable view; edits to that Markdown are preserved as notes but do not change the structured render plan. Readable storybooks and script timestamp cues are refreshed from YAML changes when their Markdown has not been manually edited. Reviewed structured script inputs cannot be changed while reusing their old approval.
+
+Planning and production both read the same shared `Globals/creative-direction.md`; no per-video creative-direction file or visual identity-generation stage is created. Use `--creative-direction FILE` to select another shared file, including when using a different `--output-dir` or `--vault`. The shared file must exist and contain standards or a field template for storybook or render requests; script-only runs and dry runs do not read it. Filled fields are binding; blank fields and suggestions remain unspecified, with execution details resolved in each scene plan. Obscript never edits the shared file. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. Rendering does not change the approved narration and uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
 
 The workflow is script → timed animations → human voiceover and audio editing. Obscript generates no audio, TTS, music, sound effects, or automatic subtitles. Storybook timestamps define the animation timeline and the human recording cues; production never retimes scenes against generated speech.
 
@@ -83,7 +93,7 @@ Each stage uses the model configured in Codex and `medium` reasoning effort by d
 
 ## Artifacts
 
-Each run creates a collision-safe project under `/home/zalmo/documents/obsidian/Videos/Videos/<project>/`:
+Each new run creates a collision-safe project under `/home/zalmo/documents/obsidian/Videos/Videos/<project>/`; ID-based runs reuse that directory:
 
 ```text
 sources/source-01-.../
@@ -96,8 +106,8 @@ knowledge.yaml
 plan.md
 script.md
 review.yaml
-storybook.md              # readable scene plan for Obsidian
-storybook.yaml            # structured production plan
+storybook.md              # readable scene plan, with --storybook or --render
+storybook.yaml            # editable production plan, with --storybook or --render
 production/               # only with --render
   hyperframes/            # shared editable composition project
   scenes/scene-001/
@@ -106,6 +116,7 @@ production/               # only with --render
 production.yaml           # only after a render attempt
 video.mp4                 # silent animations, only after verified assembly
 run.yaml
+project.json              # permanent ID, original command, phase and status
 .obscript/                 # exact JSON stage state and prompts
 ```
 
@@ -127,7 +138,7 @@ For example, a human sees this cue in `script.md` and records the exact passage 
 Você observa o padrão.
 ```
 
-Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates storybook, production, and the recorded direction reference (archiving legacy per-video direction files when present); a direction change invalidates storybook and production; a storybook change invalidates production. Changes to shared standards require regenerating affected storybooks and videos; a content-hash check blocks rendering a storybook planned against different standards. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
+Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates storybook, production, and the recorded direction reference (archiving legacy per-video direction files when present); a direction change invalidates storybook and production; a storybook change invalidates production. Changes to shared standards require `obscript PROJECT_ID --storybook` to rebuild affected scene plans before rendering; a content-hash check blocks rendering a storybook planned against different standards. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. An interrupted render with unchanged inputs retains its editable HyperFrames project and marks verified completed scene media for reuse; changed inputs archive previous production. A completed render is skipped only when its inputs and final video hash still match. There is no automatic filesystem watcher.
 
 ## Skills
 

@@ -12,6 +12,8 @@ from .contracts import ContractError, parse_command_tokens
 from .models import RuntimeConfig
 from .pipeline import Pipeline
 from .production import ProductionError
+from .projects import find_project, resume_spec
+from .storage import read_json
 from .transcribe import TranscriptionError
 
 
@@ -30,6 +32,8 @@ examples:
   obscript split compress essay VIDEO --target-duration 8m
   obscript split topics VIDEO --into 4
   obscript extend essay VIDEO --render
+  obscript VIDEO --storybook
+  obscript PROJECT_ID --render
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
 is mandatory and has no translate modifier.
@@ -39,7 +43,7 @@ is mandatory and has no translate modifier.
         "command",
         nargs="+",
         metavar="COMMAND",
-        help="ordered modifiers followed by the required source argument",
+        help="ordered modifiers followed by a source, or an existing project ID",
     )
     parser.add_argument(
         "--target-duration",
@@ -112,7 +116,12 @@ is mandatory and has no translate modifier.
         action="store_true",
         help="validate and print the execution stages without transcribing or invoking Codex",
     )
-    parser.add_argument(
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument(
+        "--storybook", action="store_true",
+        help="continue through storybook validation, without rendering",
+    )
+    phase.add_argument(
         "--render", action="store_true",
         help="render silent animations through the installed HyperFrames skill",
     )
@@ -130,7 +139,7 @@ def _resolve_codex(requested: Path | None) -> Path:
     return Path(found).resolve()
 
 
-def _print_dry_run(spec) -> None:
+def _print_dry_run(spec, project_root: Path | None = None) -> None:
     stages = ["ytstt/source import", "analyze-source"]
     if spec.pipeline != "single":
         stages.append(spec.pipeline)
@@ -138,9 +147,14 @@ def _print_dry_run(spec) -> None:
         stages.append(spec.time_controller)
     if spec.format != "source":
         stages.append(spec.format)
-    stages.extend(["plan-script", "write-script", "review-script", "storybook", "validate-storybook"])
+    stages.extend(["plan-script", "write-script", "review-script"])
+    if spec.storybook or spec.render:
+        stages.extend(["storybook", "validate-storybook"])
     if spec.render:
         stages.extend(["produce-video", "package-production"])
+    if project_root:
+        print(f"resume project: {spec.project_id} ({project_root})")
+        print("completed checkpoints will be reused; saved storybooks will be revalidated")
     print("pipeline: " + " → ".join(stages))
     print(f"sources: {len(spec.sources)}")
     print(f"target_duration_seconds: {spec.target_duration_seconds or 'automatic'}")
@@ -152,22 +166,29 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        spec = parse_command_tokens(
-            args.command,
-            target_duration=args.target_duration,
-            split_count=args.into,
-            render=args.render,
-        )
+        project_root = find_project(args.output_dir.expanduser(), args.command[0]) if len(args.command) == 1 else None
+        if project_root:
+            if args.project or args.target_duration or args.into is not None:
+                raise ContractError("Resuming a project retains its name, duration, and split settings; omit --project, --target-duration, and --into")
+            spec = resume_spec(project_root, storybook=args.storybook, render=args.render)
+            if args.creative_direction is None:
+                args.creative_direction = Path(read_json(project_root / "project.json")["creative_direction"])
+        else:
+            spec = parse_command_tokens(
+                args.command,
+                target_duration=args.target_duration,
+                split_count=args.into,
+                render=args.render,
+                storybook=args.storybook,
+            )
         if args.review_passes < 1:
             raise ContractError("--review-passes must be at least 1")
         if args.dry_run:
-            _print_dry_run(spec)
+            _print_dry_run(spec, project_root)
             return 0
 
         repo_root = Path(__file__).resolve().parents[2]
-        codex = _resolve_codex(args.codex)
-        if not args.ytstt.expanduser().exists():
-            raise ContractError(f"ytstt executable does not exist: {args.ytstt}")
+        codex = (args.codex or Path(shutil.which("codex") or "codex")) if project_root else _resolve_codex(args.codex)
         args.output_dir.expanduser().mkdir(parents=True, exist_ok=True)
         args.transcripts_dir.expanduser().mkdir(parents=True, exist_ok=True)
         config = RuntimeConfig(
