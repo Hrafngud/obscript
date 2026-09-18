@@ -60,6 +60,12 @@ is mandatory and has no translate modifier.
         ),
     )
     parser.add_argument(
+        "--creative-direction",
+        type=Path,
+        metavar="FILE",
+        help="shared visual standards (default: OUTPUT_DIR/Globals/creative-direction.md)",
+    )
+    parser.add_argument(
         "--transcripts-dir",
         type=Path,
         default=Path("/home/zalmo/transcripts"),
@@ -132,7 +138,7 @@ def _print_dry_run(spec) -> None:
         stages.append(spec.time_controller)
     if spec.format != "source":
         stages.append(spec.format)
-    stages.extend(["plan-script", "write-script", "review-script", "creative-direction", "storybook", "validate-storybook"])
+    stages.extend(["plan-script", "write-script", "review-script", "storybook", "validate-storybook"])
     if spec.render:
         stages.extend(["produce-video", "package-production"])
     print("pipeline: " + " → ".join(stages))
@@ -177,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             verbose=args.verbose,
             cookies_from_browser=args.cookies_from_browser if not args.cookies else None,
             cookies=args.cookies.expanduser().resolve() if args.cookies else None,
+            creative_direction=args.creative_direction,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, CodexError, ProductionError, OSError) as exc:

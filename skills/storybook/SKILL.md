@@ -1,9 +1,11 @@
 ---
 name: storybook
-description: Bind every word of an approved obscript script to ordered visual scenes under an established creative direction. Use for visual pre-production after creative-direction, without rewriting narration.
+description: Bind every word of an approved obscript script to ordered visual scenes under shared visual standards. Use for visual pre-production after review-script passes, without rewriting narration.
 ---
 
-Read the approved structured script, structured creative direction, script plan, and target duration. Return the complete storybook using `../../schemas/storybook.schema.json`. Natural-language fields are PT-BR.
+Read the approved structured script, shared creative-direction Markdown, script plan, and target duration. Return the complete storybook using `../../schemas/storybook.schema.json`. Natural-language fields are PT-BR.
+
+The supplied shared creative-direction file is the single source of truth for the basic visual standards across all videos. Follow every filled field and restriction. Blank fields and suggested field descriptions are unspecified. Set only the execution details needed by each scene; do not invent a replacement identity, imitate the source video's identity, or create or edit a creative-direction file. The approved script supplies the video's thesis and narrative context.
 
 Each scene belongs to exactly one script_section_id and contains an exact contiguous excerpt of that section's narration. Preserve punctuation and every word. Whitespace may vary. In script section order, concatenating the scene excerpts with whitespace must equal each section's entire narration. Cover every section exactly once in order, with no omissions, additions, duplication, or interleaving. Never reconstruct narration from script.md or rewrite it for timing.
 

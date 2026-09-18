@@ -6,7 +6,7 @@
 source → analyze-source → pipeline → time → format
        → plan-script → write-script → review-script
                                       ↓ pass
-       → creative-direction → storybook → validate-storybook
+       → storybook → validate-storybook
                                       ↓ --render
        → produce-video → package-production
 ```
@@ -19,6 +19,7 @@ The local defaults match this workstation:
 - `ytstt`: `/home/zalmo/.local/bin/ytstt`
 - transcripts: `/home/zalmo/transcripts`
 - rescript output root: `/home/zalmo/documents/obsidian/Videos/Videos`
+- shared visual standards: `OUTPUT_DIR/Globals/creative-direction.md`
 
 Install the executable and symlink all versioned skills into the Codex skill directory:
 
@@ -74,7 +75,7 @@ Set `OBSCRIPT_COOKIES_FROM_BROWSER=firefox` in your shell to persist a preferenc
 
 Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
 
-Every approved script also produces `creative-direction.md`, an Obsidian-readable `storybook.md`, and the structured `storybook.yaml`. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. `--render` creates silent animations through the installed `$hyperframes` skill; it does not change the approved narration. Rendering uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
+Every approved script also produces an Obsidian-readable `storybook.md` and the structured `storybook.yaml`. Planning and production both read the same shared `Globals/creative-direction.md`; no per-video creative-direction file or identity-generation stage is created. Use `--creative-direction FILE` to select another shared file, including when using a different `--output-dir` or `--vault`. The shared file must exist and contain standards or a field template before a run; dry runs do not read it. Filled fields are binding; blank fields and suggestions remain unspecified, with execution details resolved in each scene plan. Obscript never edits the shared file. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. `--render` creates silent animations through the installed `$hyperframes` skill; it does not change the approved narration. Rendering uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
 
 The workflow is script → timed animations → human voiceover and audio editing. Obscript generates no audio, TTS, music, sound effects, or automatic subtitles. Storybook timestamps define the animation timeline and the human recording cues; production never retimes scenes against generated speech.
 
@@ -95,7 +96,6 @@ knowledge.yaml
 plan.md
 script.md
 review.yaml
-creative-direction.md
 storybook.md              # readable scene plan for Obsidian
 storybook.yaml            # structured production plan
 production/               # only with --render
@@ -113,9 +113,9 @@ A normal run or remix is one production unit. Split runs place `split-plan.yaml`
 
 If the last script review still requests revision, `script.md` and `review.yaml` remain available and the CLI exits with status 2. No visual stages or rendering run for that unit. Application validation rejects invented, missing, duplicated, or reordered voiceover; unknown or uncovered sections; nonsequential scenes; and gaps, overlaps, or incorrect timeline endpoints. Invalid storybooks are regenerated up to three times, with attempts and validation errors retained in `.obscript/`; continued failure exits with status 1 before production and leaves `storybook.md` marked `status: invalid`, including the last draft and its validation error. Successful plans use `status: validated`.
 
-The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The creative direction JSON supplies the visual identity; `creative-direction.md` documents it. `storybook.md` displays the complete scene plan: timeline, exact narration reference, composition, visual elements, on-screen text, motion, transitions, assets, and render briefs. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
+The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The shared creative-direction Markdown supplies visual standards to all videos. `storybook.md` links to that source, and `.obscript/creative-direction-source.json` records its absolute path and content hash without copying its standards. `storybook.md` displays the complete scene plan: timeline, exact narration reference, composition, visual elements, on-screen text, motion, transitions, assets, and render briefs. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
 
-Rendering uses one Codex run per video through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the complete creative direction and storybook, immutable narration references, planned timestamps, scene output destinations, final video destination, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The same agent produces every scene and the final assembly, reusing loaded skills and creative context without launching additional Codex runs. The producer initializes one editable project at `production/hyperframes/` and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+Rendering uses one Codex run per video through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the verbatim shared creative-direction Markdown, its source path, and the complete storybook, immutable narration references, planned timestamps, scene output destinations, final video destination, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The same agent produces every scene and the final assembly, reusing loaded skills and creative context without launching additional Codex runs. The producer initializes one editable project at `production/hyperframes/` and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
 
 The agent writes a durable manifest and silent video for each scene. After the run, the application verifies each scene with ffprobe: it must contain video, contain no audio track, and match its planned duration within one frame. Final assembly places scenes at the exact storybook timestamps and applies visual transitions inside those allocated intervals, preserving the planned total duration. Only a successful run with verified scenes and a verified complete assembly publishes the silent `video.mp4`. `production.yaml` records `backend: hyperframes`, `audio: false`, and `status: complete` or `status: failed`; executor failures still allow verification of completed scenes, preserve partial output, and leave `final_video` empty. The CLI exits with status 1 for production failures.
 
@@ -127,7 +127,7 @@ For example, a human sees this cue in `script.md` and records the exact passage 
 Você observa o padrão.
 ```
 
-Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates direction, storybook, and production; a direction change invalidates storybook and production; a storybook change invalidates production. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
+Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates storybook, production, and the recorded direction reference (archiving legacy per-video direction files when present); a direction change invalidates storybook and production; a storybook change invalidates production. Changes to shared standards require regenerating affected storybooks and videos; a content-hash check blocks rendering a storybook planned against different standards. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. There is no automatic filesystem watcher or resume command; rerun the pipeline to regenerate changed upstream state.
 
 ## Skills
 
@@ -138,6 +138,8 @@ analyze-source      remix       compress      topics      plan-script
 translate-context   split       extend        essay       write-script
 review-script       creative-direction       storybook       produce-video
 ```
+
+`creative-direction` is a read-only reference skill for the shared standards, not a generation stage.
 
 They can be invoked directly in Codex (for example, `$review-script`) or are loaded explicitly by the CLI for their respective stage. `translate-context` is an internal/import repair skill because ordinary analysis already emits canonical PT-BR knowledge.
 

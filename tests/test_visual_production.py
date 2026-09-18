@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,7 +15,7 @@ from obscript.contracts import ContractError, parse_command_tokens
 from obscript.models import RuntimeConfig, SourceAsset
 from obscript.pipeline import Pipeline
 from obscript.production import ProductionAgent, ProductionError, invalidate_downstream, probe_media, validate_storybook
-from obscript.storage import format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
+from obscript.storage import creative_direction_reference, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -59,18 +60,8 @@ def story_fixture() -> dict:
     ]}
 
 
-def direction_fixture() -> dict:
-    def fill(schema: dict):
-        if "const" in schema:
-            return schema["const"]
-        if schema["type"] == "object":
-            return {name: fill(child) for name, child in schema["properties"].items()}
-        if schema["type"] == "array":
-            return []
-        if schema["type"] == "integer":
-            return 8
-        return "Identidade definida"
-    return fill(read_json(REPO / "schemas/creative-direction.schema.json"))
+def direction_fixture() -> str:
+    return "# Creative Direction\n\n## Identity\n\n**Base Background:** #101010\n**Typography:** \n"
 
 
 def config_fixture(root: Path, review_passes: int = 2) -> RuntimeConfig:
@@ -197,10 +188,8 @@ class FakePlanningAgent:
             value = script_fixture()
         elif skill == "review-script":
             value = {"verdict": self.verdicts.pop(0) if self.verdicts else "pass", "recommendation": {"rerun": []}}
-        elif skill == "creative-direction":
-            value = direction_fixture()
-            assert "approved-script.json" in prompt
         elif skill == "storybook":
+            assert "shared creative direction" in prompt
             value = story_fixture()
             if self.invalid_storybooks:
                 type(self).invalid_storybooks -= 1
@@ -217,6 +206,9 @@ class PipelineVisualTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.direction = config_fixture(self.root).creative_direction_path
+        self.direction.parent.mkdir(parents=True)
+        self.direction.write_text(direction_fixture())
         self.transcript = self.root / "transcript.txt"
         self.transcript.write_text("Fonte")
         self.asset = SourceAsset("source", "Fonte", self.transcript, None, None, "pt-BR", 12)
@@ -252,7 +244,14 @@ class PipelineVisualTests(unittest.TestCase):
     def test_default_preproduction_without_media_calls(self):
         result = self.run_pipeline()
         self.assertTrue(result.passed_review)
-        self.assertEqual([path.name for path in result.outputs], ["script.md", "creative-direction.md", "storybook.md", "storybook.yaml"])
+        self.assertEqual([path.name for path in result.outputs], ["script.md", "storybook.md", "storybook.yaml"])
+        self.assertNotIn("creative-direction", [stage for stage, _ in FakePlanningAgent.calls])
+        self.assertFalse((result.project_root / "creative-direction.md").exists())
+        self.assertFalse((result.project_root / ".obscript/creative-direction.json").exists())
+        self.assertEqual(read_json(result.project_root / ".obscript/creative-direction-source.json"),
+                         creative_direction_reference(self.direction, direction_fixture()))
+        self.assertIn("(<../Globals/creative-direction.md>)", (result.project_root / "storybook.md").read_text())
+        self.assertEqual(self.direction.read_text(), direction_fixture())
         validate_storybook(read_json(result.project_root / ".obscript/approved-script.json"),
                           read_json(result.project_root / ".obscript/storybook.json"), 12)
         self.producer.assert_not_called()
@@ -260,6 +259,40 @@ class PipelineVisualTests(unittest.TestCase):
         script_text = (result.project_root / "script.md").read_text()
         self.assertIn("hook · 00:00:00.000 → 00:00:06.000", script_text)
         self.assertIn("scene-004 · 00:00:09.000 → 00:00:12.000", script_text)
+
+    def test_missing_or_empty_shared_direction_fails_before_source_import(self):
+        for content in [None, "  \n"]:
+            with self.subTest(content=content):
+                if content is None:
+                    self.direction.unlink()
+                else:
+                    self.direction.write_text(content)
+                with patch("obscript.pipeline.ingest_source") as ingest:
+                    with self.assertRaisesRegex(ContractError, "[Ss]hared creative direction"):
+                        self.run_pipeline()
+                ingest.assert_not_called()
+        self.assertFalse(FakePlanningAgent.calls)
+
+    def test_explicit_shared_direction_with_blank_fields(self):
+        custom = self.root / "Shared standards.md"
+        custom.write_text("## Identity\n\n**Typography:** \n**Motion:** \n")
+        config = replace(config_fixture(self.root), creative_direction=custom)
+        result = Pipeline(config).run(parse_command_tokens(["source"]))
+        reference = read_json(result.project_root / ".obscript/creative-direction-source.json")
+        self.assertEqual(reference["path"], str(custom))
+        self.assertIn("(<../../Shared standards.md>)", (result.project_root / "storybook.md").read_text())
+
+    def test_shared_direction_changes_during_planning_block_render(self):
+        original_run = FakePlanningAgent.run
+        def mutate_direction(agent, **kwargs):
+            result = original_run(agent, **kwargs)
+            if kwargs["skill"] == "storybook":
+                self.direction.write_text("# Updated standards")
+            return result
+        with patch.object(FakePlanningAgent, "run", mutate_direction):
+            with self.assertRaisesRegex(ContractError, "changed during storybook"):
+                self.run_pipeline(render=True)
+        self.producer.assert_not_called()
 
     def test_unresolved_review_gates_all_visual_stages(self):
         FakePlanningAgent.verdicts = ["revise", "revise"]
@@ -278,7 +311,7 @@ class PipelineVisualTests(unittest.TestCase):
         self.run_pipeline(render=True)
         stages = [stage for stage, _ in FakePlanningAgent.calls]
         self.assertEqual(stages.count("write-script"), 2)
-        self.assertGreater(stages.index("creative-direction"), max(i for i, stage in enumerate(stages) if stage == "review-script"))
+        self.assertGreater(stages.index("storybook-01"), max(i for i, stage in enumerate(stages) if stage == "review-script"))
         self.producer.return_value.produce.assert_called_once()
 
     def test_invalid_storybook_regenerated_and_never_rendered(self):
@@ -310,9 +343,13 @@ class PipelineVisualTests(unittest.TestCase):
                 result = self.run_pipeline(tokens)
                 for number in [1, 2]:
                     unit = result.project_root / f"video-{number:02d}"
-                    for name in ["knowledge.yaml", "plan.md", "script.md", "review.yaml", "creative-direction.md", "storybook.md", "storybook.yaml",
-                                 ".obscript/approved-script.json", ".obscript/creative-direction.json", ".obscript/storybook.json"]:
+                    for name in ["knowledge.yaml", "plan.md", "script.md", "review.yaml", "storybook.md", "storybook.yaml",
+                                 ".obscript/approved-script.json", ".obscript/creative-direction-source.json", ".obscript/storybook.json"]:
                         self.assertTrue((unit / name).exists(), name)
+                    self.assertFalse((unit / "creative-direction.md").exists())
+                    self.assertFalse((unit / ".obscript/creative-direction.json").exists())
+                    self.assertEqual(read_json(unit / ".obscript/creative-direction-source.json")["path"], str(self.direction))
+                    self.assertIn("(<../../Globals/creative-direction.md>)", (unit / "storybook.md").read_text())
 
     def test_script_revision_archives_stale_visuals(self):
         result = self.run_pipeline()
@@ -335,8 +372,11 @@ class ProductionExecutionTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.paths = {name: self.root / ".obscript" / f"{name}.json" for name in ["script", "direction", "storybook", "review"]}
-        for name, value in [("script", script_fixture()), ("direction", direction_fixture()), ("storybook", story_fixture()), ("review", {"verdict": "pass"})]:
+        for name, value in [("script", script_fixture()), ("storybook", story_fixture()), ("review", {"verdict": "pass"})]:
             write_json(self.paths[name], value)
+        self.paths["direction"] = config_fixture(self.root).creative_direction_path
+        self.paths["direction"].parent.mkdir(parents=True)
+        self.paths["direction"].write_text(direction_fixture())
         self.agent = ProductionAgent(config_fixture(self.root), self.root)
         self.calls = []
         self.failure = None
@@ -362,6 +402,7 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(request["hyperframes"]["brief"]["narration"], "no")
         self.assertTrue(request["hyperframes"]["render_authorized"])
         self.assertEqual(request["creative_direction"], direction_fixture())
+        self.assertEqual(request["creative_direction_source"], str(self.paths["direction"]))
         self.assertEqual(request["target_duration_seconds"], 12)
         self.assertEqual(request["hyperframes"]["project_directory"], str(output_dir / "hyperframes"))
         for scene, output in zip(request["storybook"]["scenes"], request["scene_outputs"]):
@@ -400,6 +441,27 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(manifest["actual_duration_seconds"], 12)
         self.assertEqual(manifest["target_duration_seconds"], 12)
         self.assertEqual(manifest["final_video"], "video.mp4")
+        self.assertEqual(manifest["creative_direction"], str(self.paths["direction"]))
+
+    def test_shared_direction_changes_after_planning_block_executor(self):
+        reference = self.root / ".obscript/creative-direction-source.json"
+        write_json(reference, creative_direction_reference(self.paths["direction"], direction_fixture()))
+        self.paths["direction"].write_text("# Changed standards")
+        with patch.object(self.agent, "_execute") as execute:
+            with self.assertRaisesRegex(ProductionError, "changed after storybook"):
+                self.produce()
+        execute.assert_not_called()
+        self.assertFalse((self.root / "video.mp4").exists())
+
+    def test_shared_direction_edit_during_render_is_preserved_and_blocks_publication(self):
+        def edit_shared_file(stage, request_path, output_dir):
+            self.execute_fixture(stage, request_path, output_dir)
+            self.paths["direction"].write_text("# User's updated standards")
+        with patch.object(self.agent, "_execute", side_effect=edit_shared_file), patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaisesRegex(ProductionError, "immutable upstream"):
+                self.produce()
+        self.assertEqual(self.paths["direction"].read_text(), "# User's updated standards")
+        self.assertFalse((self.root / "video.mp4").exists())
 
     def test_scene_failure_keeps_prior_scene_and_blocks_assembly(self):
         self.failure = "scene-002"

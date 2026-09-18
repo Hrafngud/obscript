@@ -11,7 +11,7 @@ from typing import Any
 
 from .contracts import ContractError
 from .models import RuntimeConfig
-from .storage import read_json, read_yaml, write_json, write_yaml
+from .storage import creative_direction_reference, read_creative_direction, read_json, read_yaml, write_json, write_yaml
 
 
 FRAME_TOLERANCE_SECONDS = 1 / 30 + 1e-6
@@ -129,7 +129,7 @@ def invalidate_downstream(unit_dir: Path, changed: str) -> None:
     if changed in {"script", "creative-direction"}:
         paths.extend(["storybook.md", "storybook.yaml", ".obscript/storybook.json"])
     if changed == "script":
-        paths.extend(["creative-direction.md", ".obscript/creative-direction.json", ".obscript/approved-script.json", ".obscript/review.json"])
+        paths.extend(["creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])
     existing = [unit_dir / name for name in paths if (unit_dir / name).exists()]
     if not existing:
         return
@@ -220,11 +220,14 @@ Do not claim success until requested local artifacts exist. Report errors clearl
 
     def produce(self, *, script_path: Path, direction_path: Path, storybook_path: Path, review_path: Path) -> Path:
         invalidate_downstream(self.project_root, "storybook")
-        script, direction, review = map(read_json, [script_path, direction_path, review_path])
+        script, review = map(read_json, [script_path, review_path])
+        direction = read_creative_direction(direction_path)
         storybook = read_yaml(storybook_path) if storybook_path.suffix in {".yaml", ".yml"} else read_json(storybook_path)
         if review["verdict"] != "pass":
             raise ProductionError("Video production requires an approved script")
-        validate_structure(direction, read_json(self.config.repo_root / "schemas/creative-direction.schema.json"))
+        reference_path = self.project_root / ".obscript/creative-direction-source.json"
+        if reference_path.exists() and read_json(reference_path) != creative_direction_reference(direction_path, direction):
+            raise ProductionError("Shared creative direction changed after storybook planning; regenerate the storybook before rendering")
         target = script["metadata"]["target_duration_seconds"]
         validate_storybook(script, storybook, target)
         production_dir = self.project_root / "production"
@@ -232,7 +235,8 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         scenes = storybook["scenes"]
         manifest: dict = {
             "schema_version": "2", "backend": "hyperframes", "audio": False, "status": "failed",
-            "creative_direction": str(direction_path.relative_to(self.project_root)),
+            "creative_direction": str(direction_path.resolve()),
+            "creative_direction_sha256": creative_direction_reference(direction_path, direction)["sha256"],
             "storybook": str(storybook_path.relative_to(self.project_root)), "script": str(script_path.relative_to(self.project_root)),
             "target_duration_seconds": target, "actual_duration_seconds": None,
             "scenes": [
@@ -244,6 +248,8 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             "final_video": None, "generated_at": None,
         }
         inputs = {path: path.read_bytes() for path in [script_path, direction_path, storybook_path, review_path]}
+        if reference_path.exists():
+            inputs[reference_path] = reference_path.read_bytes()
         for name in ["script.md", "plan.md", "knowledge.yaml", "review.yaml", "creative-direction.md", "storybook.md", "storybook.yaml"]:
             path = self.project_root / name
             if path.exists():
@@ -253,6 +259,8 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             changed = [path for path, original in inputs.items() if not path.exists() or path.read_bytes() != original]
             if changed:
                 for path in changed:
+                    if path == direction_path:
+                        continue
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(inputs[path])
                 raise ProductionError("Production attempted to modify immutable upstream inputs")
@@ -284,10 +292,11 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             write_json(request_path, {
                 "operation": "video", "script": str(script_path), "review": str(review_path),
                 "creative_direction": direction, "storybook": storybook,
+                "creative_direction_source": str(direction_path.resolve()),
                 "scene_outputs": scene_outputs, "output_video": str(assembled_video),
                 "target_duration_seconds": target,
-                "hyperframes": hyperframes_handoff(production_dir, target, direction["identity"]["visual_thesis"],
-                                                  direction["identity"]["audience"]),
+                "hyperframes": hyperframes_handoff(production_dir, target, script["thesis"],
+                                                  "Público definido na direção criativa compartilhada; quando em branco, público do roteiro aprovado"),
                 "audio_policy": "none", "output_directory": str(production_dir),
                 "timeline_policy": "Place scenes at the exact validated storybook start/end timestamps. Apply transitions within those intervals without shifting boundaries or changing total duration. Render silent video only.",
             })

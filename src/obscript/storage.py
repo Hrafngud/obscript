@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import shutil
 import unicodedata
 from pathlib import Path
 from typing import Any
+
+from .contracts import ContractError
+
+
+def read_creative_direction(path: Path) -> str:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContractError(f"Cannot read shared creative direction at {path}; create it or pass --creative-direction FILE") from exc
+    if not content.strip():
+        raise ContractError(f"Shared creative direction is empty: {path}; add standards or suggested fields")
+    return content
+
+
+def creative_direction_reference(path: Path, content: str) -> dict:
+    return {"path": str(path.resolve()), "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
 
 
 def slugify(value: str, fallback: str = "video") -> str:
@@ -141,50 +158,7 @@ def render_script(script: dict, storybook: dict | None = None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_creative_direction(direction: dict) -> str:
-    """Render the structured identity without replacing its machine-readable source."""
-    labels = {
-        "identity": "Identidade", "title": "Título", "visual_thesis": "Tese visual", "audience": "Público", "tone": "Tom",
-        "visual_language": "Linguagem visual", "style": "Estilo", "composition": "Composição", "depth": "Profundidade",
-        "texture": "Textura", "imagery": "Imagens", "iconography": "Iconografia", "color": "Cor",
-        "background": "Fundo", "foreground": "Primeiro plano", "primary": "Primária", "secondary": "Secundária",
-        "accent": "Destaque", "semantic_rules": "Regras semânticas", "typography": "Tipografia",
-        "display_style": "Títulos", "body_style": "Texto de apoio", "emphasis_style": "Ênfase",
-        "casing_rules": "Uso de maiúsculas", "text_density": "Densidade de texto", "motion": "Movimento",
-        "overall_energy": "Energia geral", "pacing": "Ritmo", "camera_behavior": "Câmera",
-        "entrance_behavior": "Entradas", "exit_behavior": "Saídas", "transition_language": "Transições",
-        "emphasis_behavior": "Ênfase em movimento", "layout": "Layout", "safe_area": "Área segura",
-        "focal_point_rules": "Ponto focal", "information_hierarchy": "Hierarquia da informação", "whitespace_rules": "Espaço livre",
-        "recurring_motifs": "Motivos recorrentes", "id": "Identificador", "description": "Descrição", "usage": "Uso",
-        "section_treatment": "Tratamento das seções", "section_type": "Tipo de seção", "visual_behavior": "Comportamento visual",
-        "pacing_behavior": "Ritmo da seção", "onscreen_text": "Texto na tela", "purpose": "Objetivo",
-        "subtitle_policy": "Legendas", "emphasis_policy": "Política de ênfase",
-        "continuity": "Continuidade", "rules": "Regras", "prohibited": "Padrões proibidos",
-        "visual_patterns": "Padrões visuais", "motion_patterns": "Padrões de movimento", "text_patterns": "Padrões de texto",
-    }
-    lines = [f"# {direction['identity']['title']}", ""]
-
-    def render(value: Any, depth: int = 2) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if isinstance(child, (dict, list)):
-                    lines.extend([f"{'#' * min(depth, 6)} {labels[key]}", ""])
-                    render(child, depth + 1)
-                else:
-                    lines.extend([f"**{labels[key]}:** {child}", ""])
-        elif isinstance(value, list):
-            for child in value:
-                if isinstance(child, dict):
-                    render(child, depth)
-                else:
-                    lines.append(f"- {child}")
-            lines.append("")
-
-    render({key: value for key, value in direction.items() if key != 'schema_version'})
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def render_storybook(storybook: dict, script: dict, *, validation_error: str | None = None) -> str:
+def render_storybook(storybook: dict, script: dict, *, direction_path: Path | None = None, validation_error: str | None = None) -> str:
     """Render an Obsidian-readable scene plan, including inspectable invalid drafts."""
     status = "invalid" if validation_error is not None else "validated"
     lines = [
@@ -196,8 +170,12 @@ def render_storybook(storybook: dict, script: dict, *, validation_error: str | N
         lines.extend(["**Rascunho não validado — produção bloqueada.**", "", f"Erro: {validation_error}", ""])
     else:
         lines.extend(["**Plano validado para animações silenciosas.**", ""])
+    direction_link = ""
+    if direction_path is not None:
+        # The caller supplies a path relative to the document for Obsidian links.
+        direction_link = f" · [Direção criativa compartilhada](<{direction_path.as_posix()}>)"
     lines.extend([
-        "[Roteiro com tempos](script.md) · [Direção criativa](creative-direction.md)", "",
+        f"[Roteiro com tempos](script.md){direction_link}", "",
         "A narração abaixo é referência para gravação humana. As animações seguem os intervalos indicados.", "",
         "## Linha do tempo", "",
         "| Cena | Seção | Início | Fim | Duração | Objetivo visual |",

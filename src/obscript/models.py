@@ -40,3 +40,8 @@ class RuntimeConfig:
     verbose: bool
     cookies_from_browser: str | None = None
     cookies: Path | None = None
+    creative_direction: Path | None = None
+
+    @property
+    def creative_direction_path(self) -> Path:
+        return (self.creative_direction or self.output_dir / "Globals/creative-direction.md").expanduser().resolve()

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import os
 from pathlib import Path
 
 from .codex_agent import CodexAgent
 from .contracts import ContractError, choose_target_duration
 from .models import CommandSpec, RuntimeConfig, SourceAsset
-from .production import ProductionAgent, invalidate_downstream, validate_storybook, validate_structure
+from .production import ProductionAgent, invalidate_downstream, validate_storybook
 from .storage import (
     copy_if_present,
     read_json,
-    render_creative_direction,
+    read_creative_direction,
+    creative_direction_reference,
     render_plan,
     render_script,
     render_storybook,
@@ -45,6 +47,8 @@ class Pipeline:
         self.config = config
 
     def run(self, spec: CommandSpec) -> PipelineResult:
+        direction_path = self.config.creative_direction_path
+        direction = read_creative_direction(direction_path)
         assets: list[SourceAsset] = []
         for source in spec.sources:
             print(f"[obscript] preparando fonte: {source}", flush=True)
@@ -85,6 +89,7 @@ class Pipeline:
                 "target_duration_seconds": spec.target_duration_seconds,
                 "split_count": spec.split_count,
                 "render": spec.render,
+                "creative_direction": creative_direction_reference(direction_path, direction),
                 "sources": list(spec.sources),
                 "agent": "Codex CLI",
                 "model": self.config.model or "configured default",
@@ -211,9 +216,10 @@ Each part must be a complete knowledge model with kind split and narrative.forma
             outputs.append(unit_dir / "script.md")
             all_passed = all_passed and approved is not None
             if approved is not None:
-                _, direction_path = self._create_creative_direction(unit_agent, spec, unit_dir, approved)
+                if read_creative_direction(direction_path) != direction:
+                    raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
                 storybook, storybook_path = self._create_storybook(unit_agent, unit_dir, approved, direction_path)
-                outputs.extend([unit_dir / "creative-direction.md", unit_dir / "storybook.md", unit_dir / "storybook.yaml"])
+                outputs.extend([unit_dir / "storybook.md", unit_dir / "storybook.yaml"])
                 if spec.render:
                     outputs.append(self._produce_video(unit_dir, approved, direction_path, storybook_path))
                     outputs.append(unit_dir / "production.yaml")
@@ -423,28 +429,6 @@ Return findings only; do not rewrite the script.""",
             (unit_dir / "script.md").write_text(render_script(script), encoding="utf-8")
         return None
 
-    def _create_creative_direction(
-        self, agent: CodexAgent, spec: CommandSpec, unit_dir: Path, approved: ApprovedScript,
-    ) -> tuple[dict, Path]:
-        invalidate_downstream(unit_dir, "creative-direction")
-        (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
-        direction, _ = agent.run(
-            stage="creative-direction", skill="creative-direction", schema="creative-direction",
-            prompt=f"""Establish one original visual identity from knowledge {approved.knowledge_path},
-plan {approved.plan_path}, and approved structured script {approved.script_path}.
-Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
-Format: {spec.format}. Pipeline: {spec.pipeline}.
-Commit to one direction in every field, with no alternatives. Narration is immutable.
-Specify silent animations only; a human will record and handle all audio outside this pipeline.
-Use supporting on-screen text without automatic subtitles.
-Do not reproduce the source video's identity. Do not invoke HyperFrames or generate media.""",
-        )
-        validate_structure(direction, read_json(self.config.repo_root / "schemas/creative-direction.schema.json"))
-        path = unit_dir / ".obscript/creative-direction.json"
-        write_json(path, direction)
-        (unit_dir / "creative-direction.md").write_text(render_creative_direction(direction), encoding="utf-8")
-        return direction, path
-
     def _create_storybook(
         self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
         direction_path: Path,
@@ -452,12 +436,17 @@ Do not reproduce the source video's identity. Do not invoke HyperFrames or gener
         invalidate_downstream(unit_dir, "storybook")
         (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
         feedback = ""
+        direction = read_creative_direction(direction_path)
+        direction_link = Path(os.path.relpath(direction_path, unit_dir))
         # A bounded retry prevents endless planning; all attempts and errors remain inspectable.
         for attempt in range(1, 4):
             storybook, _ = agent.run(
                 stage=f"storybook-{attempt:02d}", skill="storybook", schema="storybook",
                 prompt=f"""Create the complete storybook from approved structured script {approved.script_path},
-creative direction {direction_path}, and plan {approved.plan_path}.
+shared creative direction {direction_path}, and plan {approved.plan_path}.
+The shared Markdown is the single source of truth for visual standards. Honor every filled field.
+Blank fields and template suggestions are unspecified, not instructions to invent a new identity.
+Resolve unspecified execution details only in scene specifications. Never create or edit a creative-direction file.
 Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
 Cover every narration word exactly once in original section order, as contiguous exact excerpts.
 No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
@@ -469,7 +458,7 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                 self._validate_storybook(approved, storybook)
             except ContractError as exc:
                 (unit_dir / "storybook.md").write_text(
-                    render_storybook(storybook, approved.script, validation_error=str(exc)), encoding="utf-8",
+                    render_storybook(storybook, approved.script, direction_path=direction_link, validation_error=str(exc)), encoding="utf-8",
                 )
                 error_path = unit_dir / ".obscript" / f"storybook-{attempt:02d}.validation.json"
                 write_json(error_path, {"status": "invalid", "error": str(exc)})
@@ -478,9 +467,12 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                     raise ContractError(f"Storybook remained invalid after 3 attempts: {exc}; inspect {unit_dir / 'storybook.md'}") from exc
                 continue
             path = unit_dir / ".obscript/storybook.json"
+            if read_creative_direction(direction_path) != direction:
+                raise ContractError("Shared creative direction changed during storybook planning; rerun to rebuild the scene plan")
+            write_json(unit_dir / ".obscript/creative-direction-source.json", creative_direction_reference(direction_path, direction))
             write_json(path, storybook)
             write_yaml(unit_dir / "storybook.yaml", storybook)
-            (unit_dir / "storybook.md").write_text(render_storybook(storybook, approved.script), encoding="utf-8")
+            (unit_dir / "storybook.md").write_text(render_storybook(storybook, approved.script, direction_path=direction_link), encoding="utf-8")
             (unit_dir / "script.md").write_text(render_script(approved.script, storybook), encoding="utf-8")
             return storybook, unit_dir / "storybook.yaml"
         raise AssertionError("unreachable")

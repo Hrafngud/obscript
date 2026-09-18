@@ -1,16 +1,12 @@
 ---
 name: creative-direction
-description: Establish one original visual direction from an approved obscript structured script and its knowledge and plan. Use after review-script passes, before storybook planning.
+description: Consult the shared visual standards for all obscript videos. Use when applying the global creative direction during storybook planning or silent animation production.
 ---
 
-Create one committed visual identity for the finished video. Read the supplied knowledge, plan, approved structured script, target duration, format, and pipeline type. Return the complete structured direction using `../../schemas/creative-direction.schema.json`.
+Read the shared Markdown supplied by the application. The default location is `OUTPUT_DIR/Globals/creative-direction.md`; on this workstation it is `/home/zalmo/documents/obsidian/Videos/Videos/Globals/creative-direction.md`. An explicit `--creative-direction FILE` selects another shared source.
 
-The approved narration is immutable. Do not translate, paraphrase, shorten, extend, reorder, add, or remove spoken content. Do not reconstruct narration from script.md. Never imitate the source video's visual identity; source metadata supplies narrative context only.
+This file is the single source of truth for basic visual standards across videos. Follow every filled field, semantic color rule, typography rule, motion rule, layout rule, and prohibited pattern. Blank fields and field suggestions are unspecified; they are not committed design choices. Resolve the execution details needed for each scene in the storybook, using the approved script's thesis and narrative context. Never establish a new identity for each video or imitate the source video's visual identity.
 
-The deliverable is silent animations aligned to narration timestamps. A human records and handles all audio separately. Do not specify audio production, TTS, music, sound effects, or voice selection.
+The approved narration is immutable. On-screen text supplements it and introduces no unsupported facts. Produce silent animations only; a human handles narration and all audio separately. Do not specify TTS, music, sound effects, or automatic subtitles.
 
-Choose specific composition, palette, typography, motion, layout, motifs, section treatments, continuity rules, and prohibited patterns that express the script's thesis. Every field commits to one decision: no alternatives, tentative choices, or menus. Define enough detail for a producer to execute without selecting another direction. Natural-language fields are PT-BR.
-
-On-screen text supplements narration with keywords, numbers, labels, brief quotations, section markers, and short conceptual statements. Choose text density for the composition and available reading time, with no fixed word-count cap. Prefer clear, readable text and introduce no new factual claims. Set the subtitle policy to no automatic subtitles. Use semantic color rules and predictable emphasis to keep the visual hierarchy coherent.
-
-This is a read-only planning stage. Do not invoke HyperFrames or generate media. Return JSON only; the application preserves it and renders creative-direction.md.
+Consulting direction is read-only. Do not create a per-video creative-direction Markdown or JSON file, rewrite the shared file, generate media, or invoke HyperFrames during planning. The user maintains the global standards. Editing them is a separate task requiring the user's request. No separate creative-direction generation stage or output schema exists.
