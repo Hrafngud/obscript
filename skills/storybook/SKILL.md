@@ -5,6 +5,8 @@ description: Bind every word of an approved obscript script to ordered visual sc
 
 Read the approved structured script, shared creative-direction Markdown, script plan, and target duration. Return the complete storybook using `../../schemas/storybook.schema.json`. Natural-language fields are PT-BR.
 
+When narration includes inline motion annotations (`*italic*`, `**bold**`, inline backticks, `~~strikethrough~~`, or `%%comments%%`), read [obscript-parse-script](../obscript-parse-script/SKILL.md) and apply its element effects and approximate word timing while planning scenes. Preserve the exact approved narration, including annotation delimiters, and encode cues in the existing animation.emphasis and render_brief fields.
+
 The supplied shared creative-direction file is the single source of truth for the basic visual standards across all videos. Follow every filled field and restriction. Blank fields and suggested field descriptions are unspecified. Set only the execution details needed by each scene; do not invent a replacement identity, imitate the source video's identity, or create or edit a creative-direction file. The approved script supplies the video's thesis and narrative context.
 
 Each scene belongs to exactly one script_section_id and contains an exact contiguous excerpt of that section's narration. Preserve punctuation and every word. Whitespace may vary. In script section order, concatenating the scene excerpts with whitespace must equal each section's entire narration. Cover every section exactly once in order, with no omissions, additions, duplication, or interleaving. Never reconstruct narration from script.md or rewrite it for timing.

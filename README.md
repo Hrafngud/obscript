@@ -148,9 +148,12 @@ The versioned skill set is:
 analyze-source      remix       compress      topics      plan-script
 translate-context   split       extend        essay       write-script
 review-script       creative-direction       storybook       produce-video
+obscript-parse-script
 ```
 
 `creative-direction` is a read-only reference skill for the shared standards, not a generation stage.
+
+`obscript-parse-script` interprets inline narration annotations during Storybook planning: `*element*` zooms in and out, `**element**` wiggles, inline backticks pulse, `~~element~~` adds a red overlay and ❌ above the element, and `%%element%%` adds a green overlay and ✅ above it. Cues use approximate word positions within each scene, preserve the approved narration, and are recorded in the existing animation and render brief fields. It can also be invoked directly to update a storybook; it does not render video or add a separate CLI stage.
 
 They can be invoked directly in Codex (for example, `$review-script`) or are loaded explicitly by the CLI for their respective stage. `translate-context` is an internal/import repair skill because ordinary analysis already emits canonical PT-BR knowledge.
 
