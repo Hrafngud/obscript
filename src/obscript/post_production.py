@@ -39,7 +39,7 @@ The user authorized local rendering with --post-production; continue after requi
 Keep approved narration, scene order, section binding, meaning, and creative direction immutable.
 Preserve every scene boundary and the total duration. Never generate or embed any audio.
 Modify only {output_dir}. Source production, original video, upstream files, and application
-manifests are immutable. Do not launch nested Codex runs or sub-agents.
+manifests are immutable. Do not launch nested agent harness runs or sub-agents.
 Render the requested polished video and write the scene-by-scene report at the requested paths.
 Do not claim success until local artifacts exist. Report blockers clearly.
 """

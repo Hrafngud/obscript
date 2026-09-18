@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .codex_agent import CodexError
+from .agent import AgentError
 from .contracts import ContractError, parse_command_tokens, parse_duration
 from .models import CommandSpec, RuntimeConfig
 from .pipeline import Pipeline
@@ -37,6 +37,8 @@ examples:
   obscript extend essay VIDEO --render
   obscript VIDEO --storybook
   obscript PROJECT_ID --render
+  obscript VIDEO --render --opencode
+  obscript PROJECT_ID --render --opencode
   obscript PROJECT_ID --post-production
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
@@ -87,12 +89,17 @@ is mandatory and has no translate modifier.
         default=Path("/home/zalmo/.local/bin/ytstt"),
         help="ytstt executable",
     )
-    parser.add_argument(
+    harness = parser.add_mutually_exclusive_group()
+    harness.add_argument(
         "--codex",
         type=Path,
         default=None,
         help="Codex CLI executable (default: resolve from PATH)",
     )
+    harness.add_argument("--opencode", action="store_true",
+                         help="use OpenCode for all agent stages with its configured defaults")
+    parser.add_argument("--opencode-bin", type=Path, metavar="FILE",
+                        help="OpenCode executable override (requires --opencode; default: PATH)")
     auth = parser.add_mutually_exclusive_group()
     auth.add_argument(
         "--cookies-from-browser",
@@ -104,12 +111,12 @@ is mandatory and has no translate modifier.
         "--cookies", type=Path, metavar="FILE",
         help="use an exported Netscape cookies file instead of browser cookies",
     )
-    parser.add_argument("--model", help="Codex model override; default uses Codex config")
+    parser.add_argument("--model", help="selected harness model override; default uses harness config")
     parser.add_argument(
         "--reasoning-effort",
         choices=["low", "medium", "high", "xhigh"],
         default="medium",
-        help="Codex reasoning effort per stage (default: medium)",
+        help="Codex reasoning effort per stage (default: medium; OpenCode uses its own config)",
     )
     parser.add_argument(
         "--review-passes",
@@ -120,7 +127,7 @@ is mandatory and has no translate modifier.
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate and print the execution stages without transcribing or invoking Codex",
+        help="validate and print the execution stages without transcribing or invoking an agent",
     )
     phase = parser.add_mutually_exclusive_group()
     phase.add_argument(
@@ -135,7 +142,7 @@ is mandatory and has no translate modifier.
         "--post-production", action="store_true",
         help="polish an existing project's completed render with effects and varied transitions",
     )
-    parser.add_argument("--verbose", action="store_true", help="stream Codex CLI output")
+    parser.add_argument("--verbose", action="store_true", help="show agent CLI output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -147,6 +154,15 @@ def _resolve_codex(requested: Path | None) -> Path:
     if not found:
         raise ContractError("Codex CLI was not found in PATH; pass --codex")
     return Path(found).resolve()
+
+
+def _resolve_opencode(requested: Path | None, *, resume: bool = False) -> Path:
+    if requested:
+        return requested.expanduser().resolve()
+    found = shutil.which("opencode")
+    if not found and not resume:
+        raise ContractError("OpenCode CLI was not found in PATH; install OpenCode or pass --opencode-bin")
+    return Path(found).resolve() if found else Path("opencode")
 
 
 def _print_dry_run(spec, project_root: Path | None = None) -> None:
@@ -181,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.opencode_bin and not args.opencode:
+            raise ContractError("--opencode-bin requires --opencode")
         if args.command[0] == "new":
             return _new_project(args)
         if args.format is not None:
@@ -207,10 +225,19 @@ def main(argv: list[str] | None = None) -> int:
             raise ContractError("--review-passes must be at least 1")
         if args.dry_run:
             _print_dry_run(spec, project_root)
+            print(f"agent: {'OpenCode CLI' if args.opencode else 'Codex CLI'}")
             return 0
 
         repo_root = Path(__file__).resolve().parents[2]
-        codex = (args.codex or Path(shutil.which("codex") or "codex")) if project_root else _resolve_codex(args.codex)
+        opencode = None
+        if args.opencode:
+            opencode = _resolve_opencode(args.opencode_bin, resume=bool(project_root))
+            codex = Path("codex")
+        elif project_root:
+            codex = (args.codex.expanduser().resolve() if args.codex else
+                     Path(shutil.which("codex") or "codex"))
+        else:
+            codex = _resolve_codex(args.codex)
         args.output_dir.expanduser().mkdir(parents=True, exist_ok=True)
         args.transcripts_dir.expanduser().mkdir(parents=True, exist_ok=True)
         config = RuntimeConfig(
@@ -227,9 +254,11 @@ def main(argv: list[str] | None = None) -> int:
             cookies_from_browser=args.cookies_from_browser if not args.cookies else None,
             cookies=args.cookies.expanduser().resolve() if args.cookies else None,
             creative_direction=args.creative_direction,
+            harness="opencode" if args.opencode else "codex",
+            opencode=opencode,
         )
         result = Pipeline(config).run(spec)
-    except (ContractError, TranscriptionError, CodexError, ProductionError, OSError) as exc:
+    except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:
         print(f"obscript: {exc}", file=sys.stderr)
         return 1
 

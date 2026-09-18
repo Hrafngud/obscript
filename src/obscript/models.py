@@ -44,6 +44,16 @@ class RuntimeConfig:
     cookies_from_browser: str | None = None
     cookies: Path | None = None
     creative_direction: Path | None = None
+    harness: str = "codex"
+    opencode: Path | None = None
+
+    @property
+    def agent_executable(self) -> Path:
+        return (self.opencode or Path("opencode")) if self.harness == "opencode" else self.codex
+
+    @property
+    def agent_name(self) -> str:
+        return "OpenCode CLI" if self.harness == "opencode" else "Codex CLI"
 
     @property
     def creative_direction_path(self) -> Path:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "obscript"
 version = "0.1.0"
-description = "Composable Codex-powered video rescripting pipeline"
+description = "Composable Agent-powered video rescripting pipeline"
 requires-python = ">=3.11"
 
 [project.scripts]

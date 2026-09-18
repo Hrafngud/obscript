@@ -256,6 +256,37 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertEqual(read_json(result.project_root / "project.json")["id"], identity)
         self.assertEqual(read_json(result.project_root / "project.json")["phase"], "storybook")
 
+    def test_switch_to_opencode_reuses_approved_codex_script(self):
+        result = self.run_pipeline(storybook=False)
+        spec = resume_spec(result.project_root, storybook=False, render=True)
+        FakePlanningAgent.calls.clear()
+        config = replace(config_fixture(self.root), harness="opencode", opencode=Path("opencode"))
+        with patch("obscript.pipeline.OpenCodeAgent", FakePlanningAgent):
+            resumed = Pipeline(config).run(spec)
+        self.assertEqual(resumed.project_root, result.project_root)
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.ingest.assert_called_once()
+        self.assertEqual(load_yaml(result.project_root / "run.yaml")["agent"], "OpenCode CLI")
+        self.assertEqual(self.producer.call_args.args[0].harness, "opencode")
+        FakePlanningAgent.calls.clear()
+        with patch("obscript.pipeline.OpenCodeAgent", FakePlanningAgent):
+            Pipeline(config_fixture(self.root)).run(spec)
+        self.assertFalse(FakePlanningAgent.calls)
+        self.producer.return_value.produce.assert_called_once()
+
+    def test_opencode_is_selected_for_split_and_playlist_children(self):
+        config = replace(config_fixture(self.root), harness="opencode", opencode=Path("opencode"))
+        for tokens, assets in [(["split", "source"], [self.asset]), (["source"], [self.asset, self.asset])]:
+            with self.subTest(tokens=tokens):
+                self.ingest.return_value = assets
+                FakePlanningAgent.calls.clear()
+                with patch("obscript.pipeline.OpenCodeAgent", FakePlanningAgent), patch("obscript.pipeline.CodexAgent") as codex:
+                    result = Pipeline(config).run(parse_command_tokens(tokens, render=True))
+                codex.assert_not_called()
+                child_roots = {root for stage, root in FakePlanningAgent.calls if stage == "write-script"}
+                self.assertEqual(child_roots, {result.project_root / "video-01", result.project_root / "video-02"})
+                self.assertEqual(self.producer.call_args.args[0].harness, "opencode")
+
     def test_resume_manual_storybook_then_skip_completed_render(self):
         result = self.run_pipeline()
         story = story_fixture()
@@ -764,7 +795,7 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(command[command.index("-C") + 1], str(output))
         self.assertNotIn("--output-schema", command)
         self.assertIn("$hyperframes", run.call_args.kwargs["input"])
-        self.assertIn("Do not launch nested Codex runs", run.call_args.kwargs["input"])
+        self.assertIn("Do not launch nested agent harness runs", run.call_args.kwargs["input"])
         self.assertTrue((output / "executor.log").exists())
 
 

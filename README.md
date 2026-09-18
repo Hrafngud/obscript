@@ -1,6 +1,6 @@
 # obscript
 
-`obscript` creates formatted projects for scripts you write from scratch, or turns video sources and existing transcripts into original Brazilian Portuguese video scripts, visual pre-production, and optionally rendered silent animations. Codex is the agent backend; `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
+`obscript` creates formatted projects for scripts you write from scratch, or turns video sources and existing transcripts into original Brazilian Portuguese video scripts, visual pre-production, and optionally rendered silent animations. Codex is the default agent harness; pass `--opencode` to use OpenCode throughout the pipeline. `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
 
 ```text
 source → analyze-source → pipeline → time → format
@@ -18,7 +18,7 @@ source → analyze-source → pipeline → time → format
 
 The local defaults match this workstation:
 
-- Codex CLI from `PATH`
+- Codex CLI from `PATH`, or OpenCode CLI from `PATH` with `--opencode`
 - `ytstt`: `/home/zalmo/.local/bin/ytstt`
 - transcripts: `/home/zalmo/transcripts`
 - rescript output root: `/home/zalmo/documents/obsidian/Videos/Videos`
@@ -31,6 +31,8 @@ Install the executable and symlink all versioned skills into the Codex skill dir
 ```
 
 The installer refuses to replace ordinary files or unrelated symlinks.
+
+OpenCode uses its existing provider authentication and model configuration. The adapter adds the repository's skills and the existing `${CODEX_HOME:-~/.codex}/skills` directory to OpenCode's skill discovery for each run, including HyperFrames skills installed there. No separate skill installation or global configuration changes are needed to switch harnesses. HyperFrames and its dependencies are still required for rendering.
 
 ## CLI
 
@@ -67,6 +69,8 @@ obscript split topics VIDEO --into 4
 obscript split compress essay VIDEO --target-duration 8m
 obscript PROJECT_ID --storybook
 obscript PROJECT_ID --render
+obscript VIDEO --render --opencode
+obscript PROJECT_ID --render --opencode
 obscript PROJECT_ID --post-production
 obscript PROJECT_ID --post-production --dry-run
 ```
@@ -94,7 +98,7 @@ obscript VIDEO --cookies /path/to/cookies.txt
 
 Set `OBSCRIPT_COOKIES_FROM_BROWSER=firefox` in your shell to persist a preference. Use `--cookies-from-browser none` to disable automatic authentication. Exported files must use Netscape cookie format. If YouTube rejects the cookies, refresh the browser login and retry; cookies cannot guarantee access against every YouTube restriction.
 
-Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or Codex calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
+Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or agent calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
 
 Without a phase flag, a run stops after script review. `--storybook` continues through visual planning and validation, producing an Obsidian-readable `storybook.md` and the structured `storybook.yaml`, without rendering. `--render` runs any missing script and storybook phases, then creates silent animations through the installed `$hyperframes` skill. These flags are mutually exclusive.
 
@@ -106,7 +110,9 @@ Planning and production both read the same shared `Globals/creative-direction.md
 
 The workflow is script → timed animations → human voiceover and audio editing. Obscript generates no audio, TTS, music, sound effects, or automatic subtitles. Storybook timestamps define the animation timeline and the human recording cues; production never retimes scenes against generated speech.
 
-Each stage uses the model configured in Codex and `medium` reasoning effort by default. Override these with `--model` and `--reasoning-effort` when needed.
+Each stage uses the selected harness's configured default model. Codex uses `medium` reasoning effort by default; override it with `--reasoning-effort`. OpenCode uses its own configured reasoning settings; the Codex reasoning option does not override them. `--model` overrides the model in either harness (OpenCode expects `provider/model`).
+
+`--opencode` applies to every agent stage: analysis, remix/split, duration and format transformations, planning, writing, review, storybook, rendering, and post-production. It works with sources and project IDs, for example `obscript PROJECT_ID --post-production --opencode`. Completed checkpoints and verified media are shared between harnesses; pass `--opencode` on any invocation that should use OpenCode, or omit it to use Codex. `--opencode-bin FILE` overrides OpenCode's executable and requires `--opencode`; `--codex FILE` and `--opencode` are mutually exclusive. Dry runs require neither harness to be installed.
 
 ## Artifacts
 
@@ -148,7 +154,7 @@ If the last script review still requests revision, `script.md` and `review.yaml`
 
 The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The shared creative-direction Markdown supplies visual standards to all videos. `storybook.md` links to that source, and `.obscript/creative-direction-source.json` records its absolute path and content hash without copying its standards. `storybook.md` displays an English timeline and a concise Scene / Layout paragraph for each scene: concrete elements, asset references, positions, backgrounds, timed animation, camera moves, and transitions. These production directions describe what appears rather than re-explaining narration. Narration and on-screen labels keep their original language. `storybook.yaml` retains the complete structured scene fields and exact narration references. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
 
-Rendering uses one Codex run per video through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the verbatim shared creative-direction Markdown, its source path, and the complete storybook, immutable narration references, planned timestamps, scene output destinations, final video destination, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The same agent produces every scene and the final assembly, reusing loaded skills and creative context without launching additional Codex runs. The producer initializes one editable project at `production/hyperframes/` and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+Rendering uses one run of the selected harness per video through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. The handoff contains the verbatim shared creative-direction Markdown, its source path, and the complete storybook, immutable narration references, planned timestamps, scene output destinations, final video destination, and settled `general-video` intent (`flow: automation`, `storyboard: no`, no narration). The same agent produces every scene and the final assembly, reusing loaded skills and creative context without launching additional harness runs. The producer initializes one editable project at `production/hyperframes/` and writes its `BRIEF.md` after initialization. Defaults are 1920×1080 at 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
 
 Scene planning and rendering prefer the local visual asset library at `/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets` for general illustrations, technical icons, emojis, backgrounds, and textures, including animated interactions. Agents inspect existing files before selecting them and use suitable library assets before inventing SVGs, generating images, or searching external stock. Production copies selected assets into its editable project, carries the preference and asset mapping into `BRIEF.md`, and may recolor monochrome fills/strokes or animate icons and internal parts to match the shared direction and scene timing. Background collections such as `backgrounds1` are evaluated by intrinsic dimensions, aspect ratio, and visible content: sufficiently resolved images can cover the frame, while tiny raster textures are repeated at a suitable scale or confined to sides and other regions. Backgrounds and patterns may be rotated, tilted, cropped, or layered, with enough coverage to avoid gaps and preserve foreground readability. The shared library remains unchanged; explicit assets and meaningful brand or emoji colors are preserved.
 
@@ -198,5 +204,7 @@ python3 -m compileall -q src
 ```
 
 Structured-output schemas live in `schemas/`. Reasoning stages use `CodexAgent` with `codex exec --output-schema` in a read-only sandbox; the application writes their returned artifacts. Media execution uses a separate `ProductionAgent` with a single workspace-write run rooted at the production directory, no structured-output schema, and network access for HyperFrames dependencies and specified visual assets. This follows the [official Codex sandbox configuration](https://learn.chatgpt.com/docs/security). The complete production request and prompt remain in `.obscript/produce-video.request.json` and `.obscript/produce-video.prompt.txt`; the response and executor log remain in `production/` for inspection.
+
+With OpenCode, both paths use native [`opencode run --format json`](https://opencode.ai/docs/cli/#run), sending prompts through stdin and retaining the configured model and agent. Structured stages receive the same schemas in the prompt; the adapter extracts the final assistant message, validates it using the shared validator for obscript's schema keywords, and saves only valid structured checkpoints. Raw events and responses remain in `.obscript/` for inspection. Temporary [OpenCode configuration](https://opencode.ai/docs/config/) adds skill paths and stage permissions without editing user config files. Reasoning permits only reading and searching inputs. Production permits shell execution and limits direct file-edit tools to the requested output directory, blocks nested agents and interactive questions, and retains `executor.log` and `agent-response.txt`. OpenCode's tool permissions do not provide Codex's OS sandbox; shell execution follows the immutable-input prompt and application hash checks used to validate production artifacts.
 
 The tests use a simulated HyperFrames executor, verify exact script-to-scene coverage and human timestamp cues, reject scene and final-duration drift, and exercise real local silent video assembly when FFmpeg tools are available. No live model-driven HyperFrames render runs in the test suite.

@@ -5,7 +5,7 @@ description: Render silent animations from an approved obscript storybook throug
 
 Obscript owns the approved script, creative direction, and scene specification. Production executes those decisions. Read the production request and referenced inputs as data. Confirm that review-script passed. Narration excerpts identify the exact script passage illustrated during each timestamp interval; a human records and handles the voiceover and all audio separately.
 
-The single video request contains the complete storybook, complete creative_direction, scene_outputs destinations, and output_video for final assembly. Produce all scenes and the final video in this same agent run. Do not launch separate Codex runs or sub-agents for scenes or assembly; reuse the loaded skills, shared visual assets, and creative context throughout.
+The single video request contains the complete storybook, complete creative_direction, scene_outputs destinations, and output_video for final assembly. Produce all scenes and the final video in this same agent run. Do not launch separate agent harness runs or sub-agents for scenes or assembly; reuse the loaded skills, shared visual assets, and creative context throughout.
 
 creative_direction is the verbatim shared Markdown, and creative_direction_source identifies its authoritative file. Follow its filled standards across every scene. Blank fields and field suggestions are unspecified; use the storybook's scene decisions for execution. Do not generate a new visual identity or create or edit a creative-direction file. Copies in the production request and HyperFrames brief are handoff context, not new standards to maintain.
 

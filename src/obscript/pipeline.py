@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 
 from .codex_agent import CodexAgent
+from .agent import StructuredAgent
+from .opencode_agent import OpenCodeAgent
 from .contracts import ContractError, choose_target_duration
 from .models import CommandSpec, RuntimeConfig
 from .projects import create_project, find_project, update_project
@@ -52,6 +54,14 @@ class Pipeline:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
 
+    def _agent(self, project_root: Path) -> StructuredAgent:
+        adapter = OpenCodeAgent if self.config.harness == "opencode" else CodexAgent
+        return adapter(
+            executable=self.config.agent_executable, repo_root=self.config.repo_root,
+            project_root=project_root, model=self.config.model,
+            reasoning_effort=self.config.reasoning_effort, verbose=self.config.verbose,
+        )
+
     def run(self, spec: CommandSpec) -> PipelineResult:
         if spec.post_production and not spec.project_id:
             raise ContractError("Post-production requires an existing project ID")
@@ -90,14 +100,7 @@ class Pipeline:
             raise ContractError("remix requires at least two videos after source expansion")
         if spec.pipeline == "split" and len(sources) != 1:
             raise ContractError("split requires one video, but the source expanded to a playlist")
-        agent = CodexAgent(
-            executable=self.config.codex,
-            repo_root=self.config.repo_root,
-            project_root=project_root,
-            model=self.config.model,
-            reasoning_effort=self.config.reasoning_effort,
-            verbose=self.config.verbose,
-        )
+        agent = self._agent(project_root)
         write_yaml(
             project_root / "run.yaml",
             {
@@ -112,9 +115,9 @@ class Pipeline:
                 "storybook": spec.storybook,
                 "creative_direction": creative_direction_reference(direction_path, direction) if direction else None,
                 "sources": list(spec.sources),
-                "agent": "Codex CLI",
+                "agent": self.config.agent_name,
                 "model": self.config.model or "configured default",
-                "reasoning_effort": self.config.reasoning_effort,
+                "reasoning_effort": self.config.reasoning_effort if self.config.harness == "codex" else "configured default",
             },
         )
 
@@ -233,11 +236,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         all_passed = True
         for unit_dir, unit_knowledge in units:
             unit_dir.mkdir(parents=True, exist_ok=True)
-            unit_agent = agent if unit_dir == project_root else CodexAgent(
-                executable=self.config.codex, repo_root=self.config.repo_root,
-                project_root=unit_dir, model=self.config.model,
-                reasoning_effort=self.config.reasoning_effort, verbose=self.config.verbose,
-            )
+            unit_agent = agent if unit_dir == project_root else self._agent(unit_dir)
             approved = self._produce_script(unit_agent, spec, unit_dir, unit_knowledge)
             outputs.append(unit_dir / "script.md")
             all_passed = all_passed and approved is not None
@@ -316,7 +315,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
 
     def _transform_knowledge(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         *,
         skill: str,
         stage: str,
@@ -335,7 +334,7 @@ Preserve its kind and provenance. Return the transformed knowledge model only. {
 
     def _format_knowledge(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         *,
         format_name: str,
         input_path: Path,
@@ -353,7 +352,7 @@ Set narrative.format to {format_name}. Preserve factual content and provenance. 
 
     def _plan(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         spec: CommandSpec,
         input_path: Path,
         target_seconds: int,
@@ -371,7 +370,7 @@ The timed sum of hook and sections should closely match the target. Do not write
 
     def _write(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         spec: CommandSpec,
         knowledge_path: Path,
         plan_path: Path,
@@ -393,7 +392,7 @@ Use original, natural spoken PT-BR and introduce no facts absent from the knowle
 
     def _review(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         spec: CommandSpec,
         knowledge_path: Path,
         plan_path: Path,
@@ -411,7 +410,7 @@ Return findings only; do not rewrite the script.""",
 
     def _produce_script(
         self,
-        agent: CodexAgent,
+        agent: StructuredAgent,
         spec: CommandSpec,
         unit_dir: Path,
         pipeline_knowledge: dict,
@@ -544,7 +543,7 @@ Return findings only; do not rewrite the script.""",
         }
 
     def _get_storybook(
-        self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
+        self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
         direction_path: Path, *, render: bool = False,
     ) -> tuple[dict, Path]:
         path = unit_dir / "storybook.yaml"
@@ -579,7 +578,7 @@ Return findings only; do not rewrite the script.""",
         return self._create_storybook(agent, unit_dir, approved, direction_path)
 
     def _create_storybook(
-        self, agent: CodexAgent, unit_dir: Path, approved: ApprovedScript,
+        self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
         direction_path: Path,
     ) -> tuple[dict, Path]:
         invalidate_downstream(unit_dir, "storybook")

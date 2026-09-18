@@ -200,5 +200,67 @@ class CliDefaultsTests(unittest.TestCase):
         self.assertEqual(args.creative_direction, Path("/tmp/shared.md"))
 
 
+class OpenCodeCliTests(unittest.TestCase):
+    def test_flag_selects_opencode_for_source_and_resume(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            project = root / 'saved'
+            create_project(project, parse_command_tokens(['VIDEO']), root / 'Globals/creative-direction.md')
+            identity = read_json(project / 'project.json')['id']
+            for source in ['VIDEO', identity]:
+                with self.subTest(source=source):
+                    with patch('obscript.cli.Pipeline') as pipeline, patch('obscript.cli._resolve_codex') as codex, \
+                         patch('obscript.cli.shutil.which', return_value='/usr/bin/opencode') as which:
+                        pipeline.return_value.run.return_value = SimpleNamespace(project_root=project, outputs=(), passed_review=True)
+                        self.assertEqual(main([source, '--render', '--opencode', '--vault', directory,
+                                               '--transcripts-dir', str(root / 'transcripts')]), 0)
+                    config = pipeline.call_args.args[0]
+                    self.assertEqual(config.harness, 'opencode')
+                    self.assertEqual(config.agent_executable, Path('/usr/bin/opencode'))
+                    self.assertIsNone(config.model)
+                    self.assertTrue(pipeline.return_value.run.call_args.args[0].render)
+                    codex.assert_not_called()
+                    which.assert_called_once_with('opencode')
+
+    def test_opencode_dry_run_needs_no_harness_installation(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as output:
+            root = Path(directory) / 'unused'
+            with patch('obscript.cli.Pipeline') as pipeline, patch('obscript.cli.shutil.which') as which:
+                self.assertEqual(main(['VIDEO', '--render', '--opencode', '--dry-run', '--vault', str(root)]), 0)
+            pipeline.assert_not_called()
+            which.assert_not_called()
+            self.assertFalse(root.exists())
+            self.assertIn('agent: OpenCode CLI', output.getvalue())
+            self.assertIn('produce-video', output.getvalue())
+
+    def test_missing_opencode_has_an_actionable_error(self):
+        with tempfile.TemporaryDirectory() as directory, patch('obscript.cli.shutil.which', return_value=None), \
+             contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(main(['VIDEO', '--opencode', '--vault', str(Path(directory) / 'unused')]), 1)
+            self.assertIn('OpenCode CLI was not found', error.getvalue())
+            self.assertIn('--opencode-bin', error.getvalue())
+            self.assertFalse((Path(directory) / 'unused').exists())
+
+    def test_executable_override_and_model_are_forwarded(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            with patch('obscript.cli.Pipeline') as pipeline, patch('obscript.cli.shutil.which') as which:
+                pipeline.return_value.run.return_value = SimpleNamespace(project_root=Path(directory), outputs=(), passed_review=True)
+                self.assertEqual(main(['VIDEO', '--opencode', '--opencode-bin', '/custom/opencode',
+                                       '--model', 'provider/model', '--vault', directory,
+                                       '--transcripts-dir', directory]), 0)
+            config = pipeline.call_args.args[0]
+            self.assertEqual(config.agent_executable, Path('/custom/opencode'))
+            self.assertEqual(config.model, 'provider/model')
+            which.assert_not_called()
+
+    def test_executable_override_requires_selection_and_flags_are_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(['VIDEO', '--opencode-bin', '/custom/opencode', '--dry-run']), 1)
+            with self.assertRaises(SystemExit):
+                build_parser().parse_args(['VIDEO', '--opencode', '--codex', '/custom/codex'])
+
+
 if __name__ == "__main__":
     unittest.main()
