@@ -13,7 +13,9 @@ class TranscriptionTests(unittest.TestCase):
         for options, expected in (
             ({"cookies_from_browser": "firefox:default"}, ["--cookies-from-browser", "firefox:default"]),
             ({"cookies": Path("cookies.txt")}, ["--cookies", "cookies.txt"]),
-            ({}, []),
+            ({}, ["--cookies-from-browser", "firefox"]),
+            ({"cookies_from_browser": None}, ["--cookies-from-browser", "firefox"]),
+            ({"cookies_from_browser": ""}, ["--cookies-from-browser", "firefox"]),
         ):
             with self.subTest(options=options), tempfile.TemporaryDirectory() as temporary:
                 def transcribe(command, **kwargs):

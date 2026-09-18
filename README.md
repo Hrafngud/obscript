@@ -82,10 +82,12 @@ A source may be a video URL, playlist URL, local media file, transcript director
 Install cookie support for the workstation's existing `ytstt` once:
 
 ```bash
-python3 scripts/install-ytstt-auth.py --apply
+python3 scripts/install-ytstt-auth.py --apply --install-dependencies
 ```
 
-The installer backs up `ytstt.py` before patching it and installs the versioned authentication adapter beside it. Omit `--apply` to review the diff; use `--ytstt-home PATH` for another installation. Reapply after a `ytstt` update if needed.
+The installer backs up `ytstt.py` before patching it and installs the versioned authentication adapter beside it. `--install-dependencies` upgrades `yt-dlp[default]` inside ytstt's own virtualenv, including its matching `yt-dlp-ejs` challenge solver scripts. To review the diff, omit both flags; use `--ytstt-home PATH` for another installation. Reapply after a `ytstt` update if needed.
+
+YouTube also requires Node 22+ or Deno 2.3+ on `PATH`. The adapter enables both runtimes, so an existing Node installation can solve YouTube's JavaScript challenges. It shows yt-dlp warnings to make missing runtime or solver dependencies visible. Without these components, valid Firefox cookies can still lead to “The page needs to be reloaded.” See the [yt-dlp JavaScript setup guide](https://github.com/yt-dlp/yt-dlp/wiki/EJS).
 
 Obscript always passes `--cookies-from-browser firefox` to ytstt by default. With the adapter installed, Firefox cookies are loaded before the first request, for both URL inspection and audio downloads, including individual playlist items. Sign in to YouTube in Firefox. Reapply the installer above to update an already installed adapter. To choose a browser or profile explicitly:
 
@@ -149,6 +151,8 @@ project.json              # permanent ID, original command, phase and status
 ```
 
 A normal run or remix is one production unit. Split runs place `split-plan.yaml` at the project root; each `video-01/`, `video-02/`, and so on owns its knowledge, plan, script, review, visual artifacts, production files, and `.obscript/` state. Independent playlists use the same child layout plus `playlist-plan.yaml`.
+
+Script reviews accept estimated speaking durations within ±30% of the requested target (inclusive). This tolerance applies to narration estimates, not storybook timeline endpoints or rendered-media validation. Other quality checks remain in place, and minor optional improvements alone do not require revision.
 
 If the last script review still requests revision, `script.md` and `review.yaml` remain available and the CLI exits with status 2. No visual stages or rendering run for that unit. Application validation rejects invented, missing, duplicated, or reordered voiceover; unknown or uncovered sections; nonsequential scenes; and gaps, overlaps, or incorrect timeline endpoints. Invalid storybooks are regenerated up to three times, with attempts and validation errors retained in `.obscript/`; continued failure exits with status 1 before production and leaves `storybook.md` marked `status: invalid`, including the last draft and its validation error. Successful plans use `status: validated`.
 

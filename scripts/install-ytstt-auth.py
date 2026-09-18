@@ -6,6 +6,7 @@ import argparse
 import difflib
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -16,7 +17,13 @@ def main() -> None:
         default=Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "ytstt",
     )
     parser.add_argument("--apply", action="store_true", help="write changes; default prints the diff")
+    parser.add_argument(
+        "--install-dependencies", action="store_true",
+        help="upgrade yt-dlp and install its challenge solver in ytstt's virtualenv (requires --apply)",
+    )
     args = parser.parse_args()
+    if args.install_dependencies and not args.apply:
+        parser.error("--install-dependencies requires --apply")
     target = args.ytstt_home.expanduser() / "ytstt.py"
     original = target.read_text(encoding="utf-8")
     updated = original
@@ -42,6 +49,14 @@ def main() -> None:
         backup = target.with_suffix(".py.before-obscript-auth")
         if backup.exists():
             parser.error(f"refusing to overwrite the existing backup: {backup}")
+    if args.install_dependencies:
+        python = target.parent / ".venv/bin/python"
+        if not python.is_file():
+            parser.error(f"ytstt virtualenv Python not found: {python}")
+        subprocess.run([
+            str(python), "-m", "pip", "install", "--upgrade", "yt-dlp[default]",
+        ], check=True)
+    if updated != original:
         shutil.copy2(target, backup)
     adapter = Path(__file__).resolve().parents[1] / "src/obscript/ytstt_auth.py"
     shutil.copy2(adapter, target.parent / "obscript_ytstt_auth.py")

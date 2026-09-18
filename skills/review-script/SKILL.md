@@ -17,6 +17,8 @@ Check:
 - adherence to `topics`, `essay`, or preserved-source format;
 - estimated speaking duration against the target.
 
-Estimate duration from the actual narration at a realistic PT-BR explanatory pace, accounting for punctuation and pauses. Mark a duration issue when the estimate differs materially from target, not for trivial variance.
+Estimate duration from the actual narration at a realistic PT-BR explanatory pace, accounting for punctuation and pauses. Accept estimates within ±30% of the target, including both boundaries: set duration.status to `on_target` and do not report a duration issue or require revision for this variance. Outside this range, use `too_short` or `too_long` and report a high-severity duration issue. Keep the requested target unchanged.
 
-Classify issues by severity and section. Set the verdict to `pass` only when no high-severity issue remains and the script is usable as delivered. Recommend the smallest stage that should be rerun, normally `write-script`; use an earlier stage only for a genuine knowledge-selection or structural defect. Do not rewrite the script in the review.
+Judge spoken rhythm at a natural pace, not by assuming narration must fit the exact target or each planned section time. When the overall estimate is within tolerance, a section's optimistic timing label alone is not a blocking rhythm defect. Genuine unclear or unnatural narration remains reviewable.
+
+Classify issues by severity and section. Set the verdict to `pass` when no high-severity issue remains and the script is usable as delivered; minor optional improvements alone do not require revision. On a pass, leave recommendation.rerun empty. Otherwise recommend the smallest stage that should be rerun, normally `write-script`; use an earlier stage only for a genuine knowledge-selection or structural defect. Do not rewrite the script in the review.

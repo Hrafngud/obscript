@@ -7,6 +7,7 @@ from obscript.contracts import (
     choose_target_duration,
     parse_command_tokens,
     parse_duration,
+    script_duration_bounds,
 )
 
 
@@ -21,6 +22,26 @@ class DurationTests(unittest.TestCase):
     def test_invalid_duration(self) -> None:
         with self.assertRaises(ContractError):
             parse_duration("8 minutes")
+
+    def test_script_review_duration_tolerance(self) -> None:
+        for target, bounds in [(100, (70, 130)), (126, (89, 163)), (1, (1, 1))]:
+            with self.subTest(target=target):
+                self.assertEqual(script_duration_bounds(target), bounds)
+                minimum, maximum = bounds
+                self.assertGreaterEqual(minimum * 100, target * 70)
+                self.assertLess((minimum - 1) * 100, target * 70)
+                self.assertLessEqual(maximum * 100, target * 130)
+                self.assertGreater((maximum + 1) * 100, target * 130)
+
+    def test_reported_run_is_within_duration_tolerance(self) -> None:
+        minimum, maximum = script_duration_bounds(126)
+        self.assertLessEqual(minimum, 151)
+        self.assertGreaterEqual(maximum, 151)
+
+    def test_script_review_rejects_invalid_target(self) -> None:
+        for target in [0, -1]:
+            with self.subTest(target=target), self.assertRaises(ContractError):
+                script_duration_bounds(target)
 
 
 class GrammarTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from pathlib import Path
 from .codex_agent import CodexAgent
 from .agent import StructuredAgent
 from .opencode_agent import OpenCodeAgent
-from .contracts import ContractError, choose_target_duration
+from .contracts import ContractError, choose_target_duration, script_duration_bounds
 from .models import CommandSpec, RuntimeConfig
 from .projects import create_project, find_project, update_project
 from .production import ProductionAgent, invalidate_downstream, validate_storybook
@@ -399,12 +399,17 @@ Use original, natural spoken PT-BR and introduce no facts absent from the knowle
         script_path: Path,
         target_seconds: int,
     ) -> tuple[dict, Path]:
+        minimum_seconds, maximum_seconds = script_duration_bounds(target_seconds)
         return agent.run(
             stage="review-script",
             skill="review-script",
             schema="review",
             prompt=f"""Independently review script {script_path} against knowledge {knowledge_path} and plan {plan_path}.
 Expected format: {spec.format}. Expected duration: {target_seconds} seconds.
+Duration tolerance: ±30% of the expected duration. Estimates from {minimum_seconds} to {maximum_seconds} seconds
+inclusive are on_target and must not cause a duration issue or a revise verdict.
+Evaluate speaking pace naturally, not by forcing narration into the exact target or individual planned section times.
+Keep other quality checks; minor optional improvements alone do not require revision.
 Return findings only; do not rewrite the script.""",
         )
 

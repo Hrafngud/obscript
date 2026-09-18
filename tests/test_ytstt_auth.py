@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import io
 import tempfile
 import types
 import unittest
@@ -49,84 +51,97 @@ class YoutubeAuthTests(unittest.TestCase):
             spec.loader.exec_module(self.auth)
         FakeYoutubeDL.calls = []
         FakeYoutubeDL.outcomes = []
+        self.auth.configure_auth(argparse.Namespace(cookies=None, cookies_from_browser=None))
+
+    def test_firefox_cookies_on_first_inspection_and_every_playlist_download(self):
+        FakeYoutubeDL.outcomes = [{"title": "playlist"}, {"title": "video"}, {"title": "next"}]
+        for url, options, download in (
+            ("https://www.youtube.com/playlist?list=playlist", {"extract_flat": True}, False),
+            ("https://youtu.be/video", {"format": "bestaudio/best"}, True),
+            ("https://youtu.be/next", {"format": "bestaudio/best"}, True),
+        ):
+            with self.auth.YoutubeDL(options) as ydl:
+                ydl.extract_info(url, download=download)
+            params, actual_url, kwargs = FakeYoutubeDL.calls[-1]
+            self.assertEqual(params["cookiesfrombrowser"][0], "firefox")
+            self.assertEqual(actual_url, url)
+            self.assertEqual(kwargs, {"download": download})
+            for key, value in options.items():
+                self.assertEqual(params[key], value)
+        self.assertEqual(len(FakeYoutubeDL.calls), 3)
+
+    def test_parser_defaults_and_environment_override(self):
+        with patch.dict("os.environ", {}, clear=True):
+            parser = argparse.ArgumentParser()
+            self.auth.add_cookie_arguments(parser)
+            self.assertEqual(parser.parse_args([]).cookies_from_browser, "firefox")
+        with patch.dict("os.environ", {"OBSCRIPT_COOKIES_FROM_BROWSER": "chrome:Default"}):
+            parser = argparse.ArgumentParser()
+            self.auth.add_cookie_arguments(parser)
+            args = parser.parse_args([])
+            self.auth.configure_auth(args)
+            self.assertEqual(self.auth.YoutubeDL().params["cookiesfrombrowser"][0], "chrome:Default")
+            args = parser.parse_args(["--cookies-from-browser", "firefox:work"])
+            self.auth.configure_auth(args)
+            self.assertEqual(self.auth.YoutubeDL().params["cookiesfrombrowser"][0], "firefox:work")
+
+    def test_legacy_auto_uses_firefox_immediately(self):
         self.auth.configure_auth(argparse.Namespace(cookies=None, cookies_from_browser="auto"))
+        FakeYoutubeDL.outcomes = [{"title": "video"}]
+        self.auth.YoutubeDL().extract_info("https://youtu.be/video")
+        self.assertEqual(FakeYoutubeDL.calls[0][0]["cookiesfrombrowser"][0], "firefox")
 
-    def test_retry_and_reuse_for_playlist_download(self):
-        FakeYoutubeDL.outcomes = [FakeDownloadError("Sign in to confirm you’re not a bot"),
-                                  {"title": "video"}, {"title": "next"}]
-        with patch.object(self.auth, "_detect_browser", return_value="firefox"):
-            with self.auth.YoutubeDL({"extract_flat": True}) as ydl:
-                self.assertEqual(ydl.extract_info("https://www.youtube.com/watch?v=video", download=False),
-                                 {"title": "video"})
-            with self.auth.YoutubeDL({"format": "bestaudio/best"}) as ydl:
-                ydl.extract_info("https://youtu.be/next", download=True)
-        first, retry, following = FakeYoutubeDL.calls
-        self.assertNotIn("cookiesfrombrowser", first[0])
-        self.assertEqual(retry[0]["cookiesfrombrowser"][0], "firefox")
-        self.assertTrue(retry[0]["extract_flat"])
-        self.assertEqual(retry[2], {"download": False})
-        self.assertEqual(following[0]["cookiesfrombrowser"][0], "firefox")
-        self.assertEqual(following[2], {"download": True})
+    def test_javascript_runtime_defaults_and_explicit_override(self):
+        params = self.auth.YoutubeDL({"quiet": True, "no_warnings": True}).params
+        self.assertEqual(params["js_runtimes"], {"deno": {}, "node": {}})
+        self.assertFalse(params["no_warnings"])
+        self.assertTrue(params["quiet"])
+        params = self.auth.YoutubeDL({"js_runtimes": {"deno": {"path": "/custom/deno"}}}).params
+        self.assertEqual(params["js_runtimes"], {"deno": {"path": "/custom/deno"}})
 
-    def test_firefox_is_preferred_when_chrome_is_also_installed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            home = Path(temporary)
-            (home / ".mozilla/firefox").mkdir(parents=True)
-            (home / ".config/google-chrome").mkdir(parents=True)
-            with patch.object(self.auth.Path, "home", return_value=home), patch.dict(
-                "os.environ", {"XDG_CONFIG_HOME": str(home / ".config")}
-            ):
-                self.assertEqual(self.auth._detect_browser(), "firefox")
+    def test_reload_error_explains_solver_dependencies(self):
+        def fail():
+            raise FakeDownloadError("The page needs to be reloaded.")
 
-    def test_flatpak_firefox_is_preferred_over_chrome(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            home = Path(temporary)
-            profile = home / ".var/app/org.mozilla.firefox/.mozilla/firefox"
-            profile.mkdir(parents=True)
-            (home / ".config/google-chrome").mkdir(parents=True)
-            with patch.object(self.auth.Path, "home", return_value=home), patch.dict(
-                "os.environ", {"XDG_CONFIG_HOME": str(home / ".config")}
-            ):
-                self.assertEqual(self.auth._detect_browser(), f"firefox:{profile}")
+        with contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertEqual(self.auth.run(fail), 1)
+        self.assertIn("yt-dlp[default]", stderr.getvalue())
+        self.assertIn("Node 22+", stderr.getvalue())
+        self.assertNotIn("refresh the login", stderr.getvalue())
 
-    def test_unrelated_errors_are_not_retried(self):
-        for url, message in (("https://youtu.be/video", "Video unavailable"),
-                             ("https://example.com/video", "Sign in to confirm you're not a bot")):
-            with self.subTest(url=url):
+    def test_errors_are_not_retried_anonymously(self):
+        for message in ("Video unavailable", "Sign in to confirm you're not a bot",
+                        "The page needs to be reloaded."):
+            with self.subTest(message=message):
                 FakeYoutubeDL.calls = []
                 FakeYoutubeDL.outcomes = [FakeDownloadError(message)]
                 with self.assertRaises(FakeDownloadError):
-                    self.auth.YoutubeDL().extract_info(url)
+                    self.auth.YoutubeDL().extract_info("https://youtu.be/video")
                 self.assertEqual(len(FakeYoutubeDL.calls), 1)
+                self.assertEqual(FakeYoutubeDL.calls[0][0]["cookiesfrombrowser"][0], "firefox")
 
-    def test_explicit_authentication_and_opt_out_do_not_retry(self):
+    def test_explicit_browser_file_and_opt_out(self):
         with tempfile.TemporaryDirectory() as temporary:
             cookies = Path(temporary) / "cookies.txt"
             cookies.touch()
-            for selector, file in (("firefox", None), ("none", None), ("auto", cookies)):
+            for selector, file in (("firefox:work", None), ("none", None), ("firefox", cookies)):
                 with self.subTest(selector=selector, file=file):
                     self.auth.configure_auth(argparse.Namespace(cookies=file, cookies_from_browser=selector))
-                    FakeYoutubeDL.calls = []
-                    FakeYoutubeDL.outcomes = [FakeDownloadError("Sign in to confirm you're not a bot")]
-                    with self.assertRaises(FakeDownloadError):
-                        self.auth.YoutubeDL().extract_info("https://youtu.be/video")
-                    self.assertEqual(len(FakeYoutubeDL.calls), 1)
-                    params = FakeYoutubeDL.calls[0][0]
+                    params = self.auth.YoutubeDL().params
                     if file:
                         self.assertEqual(params["cookiefile"], str(file))
-                    elif selector == "firefox":
-                        self.assertEqual(params["cookiesfrombrowser"][0], "firefox")
+                        self.assertNotIn("cookiesfrombrowser", params)
+                    elif selector == "none":
+                        self.assertNotIn("cookiesfrombrowser", params)
+                        self.assertNotIn("cookiefile", params)
+                    else:
+                        self.assertEqual(params["cookiesfrombrowser"][0], selector)
 
-    def test_retry_is_bounded_and_missing_browser_is_actionable(self):
-        for browser in (None, "chrome"):
-            with self.subTest(browser=browser):
-                self.auth.configure_auth(argparse.Namespace(cookies=None, cookies_from_browser="auto"))
-                FakeYoutubeDL.calls = []
-                FakeYoutubeDL.outcomes = [FakeDownloadError("Sign in to confirm you're not a bot")] * 2
-                with patch.object(self.auth, "_detect_browser", return_value=browser):
-                    with self.assertRaises(FakeDownloadError):
-                        self.auth.YoutubeDL().extract_info("https://youtu.be/video")
-                self.assertEqual(len(FakeYoutubeDL.calls), 2 if browser else 1)
+    def test_missing_cookie_file_reports_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "cookies file does not exist"):
+                self.auth.configure_auth(argparse.Namespace(
+                    cookies=Path(temporary) / "missing.txt", cookies_from_browser=None))
 
 
 if __name__ == "__main__":

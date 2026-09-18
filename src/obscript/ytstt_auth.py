@@ -51,16 +51,36 @@ def _browser_options(selector: str) -> dict:
 
 class YoutubeDL(BaseYoutubeDL):
     def __init__(self, params=None, *args, **kwargs):
-        super().__init__({**(params or {}), **_cookies}, *args, **kwargs)
+        options = {
+            # yt-dlp only enables Deno by default. Workstations with Node
+            # also need it enabled to solve YouTube's JavaScript challenges.
+            "js_runtimes": {"deno": {}, "node": {}},
+            **(params or {}),
+            **_cookies,
+        }
+        # ytstt suppresses warnings, hiding missing runtimes/solver packages
+        # behind misleading YouTube reload or authentication errors.
+        options["no_warnings"] = False
+        super().__init__(options, *args, **kwargs)
+
 
 def run(main) -> int:
     try:
         return main()
     except (DownloadError, ValueError) as exc:
         print(f"ytstt: {exc}", file=sys.stderr)
-        print(
-            "For YouTube authentication, sign in and use --cookies-from-browser "
-            "firefox (or another browser); refresh the login if cookies are rejected.",
-            file=sys.stderr,
-        )
+        if "the page needs to be reloaded" in str(exc).lower():
+            print(
+                "YouTube extraction also requires a JavaScript runtime (Node 22+ or Deno 2.3+) "
+                "and matching challenge solver scripts. In ytstt's Python environment, run "
+                'python -m pip install -U "yt-dlp[default]". '
+                "See https://github.com/yt-dlp/yt-dlp/wiki/EJS",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "For YouTube authentication, sign in and use --cookies-from-browser "
+                "firefox (or another browser); refresh the login if cookies are rejected.",
+                file=sys.stderr,
+            )
         return 1

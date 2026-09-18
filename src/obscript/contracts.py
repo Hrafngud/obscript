@@ -124,3 +124,10 @@ def choose_target_duration(
     if controller == "extend":
         return max(60, round(base * 1.5))
     return max(1, base)
+
+
+def script_duration_bounds(target_seconds: int) -> tuple[int, int]:
+    """Inclusive integer-second bounds for the script review's ±30% tolerance."""
+    if target_seconds < 1:
+        raise ContractError("duration must be greater than zero")
+    return (target_seconds * 70 + 99) // 100, target_seconds * 130 // 100

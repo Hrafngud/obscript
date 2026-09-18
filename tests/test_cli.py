@@ -176,12 +176,19 @@ class CliDefaultsTests(unittest.TestCase):
             pipeline.assert_not_called()
 
     def test_cookie_options(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(build_parser().parse_args(["VIDEO"]).cookies_from_browser, "firefox")
+        with patch.dict("os.environ", {"OBSCRIPT_COOKIES_FROM_BROWSER": ""}):
+            self.assertEqual(build_parser().parse_args(["VIDEO"]).cookies_from_browser, "firefox")
         args = build_parser().parse_args(["VIDEO", "--cookies-from-browser", "firefox:default"])
         self.assertEqual(args.cookies_from_browser, "firefox:default")
         args = build_parser().parse_args(["VIDEO", "--cookies", "cookies.txt"])
         self.assertEqual(args.cookies, Path("cookies.txt"))
         with patch.dict("os.environ", {"OBSCRIPT_COOKIES_FROM_BROWSER": "chrome"}):
             self.assertEqual(build_parser().parse_args(["VIDEO"]).cookies_from_browser, "chrome")
+            self.assertEqual(build_parser().parse_args([
+                "VIDEO", "--cookies-from-browser", "firefox:work"
+            ]).cookies_from_browser, "firefox:work")
 
     def test_rescript_output_root(self) -> None:
         args = build_parser().parse_args(["VIDEO"])
