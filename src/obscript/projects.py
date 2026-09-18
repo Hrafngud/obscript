@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from .contracts import ContractError
 from .models import CommandSpec
-from .storage import read_json, write_json
+from .storage import read_json, render_script, slugify, unique_directory, write_json, write_yaml
 
 
 def now() -> str:
@@ -50,8 +50,50 @@ def create_project(root: Path, spec: CommandSpec, direction_path: Path) -> dict:
     return metadata
 
 
+def create_original_project(output_dir: Path, title: str, spec: CommandSpec,
+                            direction_path: Path, *, project_name: str | None = None) -> Path:
+    root = unique_directory(output_dir, slugify(project_name or title, "novo-roteiro"))
+    metadata = create_project(root, spec, direction_path)
+    metadata.update(origin="original", title=title, status="draft")
+    write_json(root / "project.json", metadata)
+    script = {
+        "title": title,
+        "thesis": "[Escreva a ideia central ou tese do vídeo.]",
+        "metadata": {
+            "pipeline": spec.pipeline,
+            "time_controller": spec.time_controller,
+            "format": spec.format,
+            "target_duration_seconds": spec.target_duration_seconds,
+        },
+        "sections": [
+            {"title": heading, "narration": instruction}
+            for heading, instruction in [
+                ("Gancho", "[Abra com uma pergunta, situação ou ideia que desperte curiosidade.]"),
+                ("Introdução", "[Apresente o tema e o que o público vai entender.]"),
+                ("Desenvolvimento", "[Desenvolva suas ideias com argumentos e exemplos. Crie outras seções conforme necessário.]"),
+                ("Conclusão", "[Retome a ideia central e deixe uma reflexão ou próximo passo.]"),
+            ]
+        ],
+    }
+    text = render_script(script)
+    text = f"---\nproject_id: {metadata['id']}\norigin: original\nstatus: draft\n" + text[len("---\n"):]
+    (root / "script.md").write_text(text, encoding="utf-8")
+    write_yaml(root / "run.yaml", {
+        "project_id": metadata["id"],
+        "created_at": metadata["created_at"],
+        "origin": "original",
+        **metadata["command"],
+        "creative_direction": str(direction_path),
+        "agent": None,
+    })
+    return root
+
+
 def resume_spec(root: Path, *, storybook: bool, render: bool) -> CommandSpec:
     metadata = read_json(root / "project.json")
+    if metadata.get("origin") == "original":
+        raise ContractError(f"Original projects are manual drafts; edit {root / 'script.md'}. "
+                            "They do not have reviewed structured checkpoints for storybook or rendering.")
     command = dict(metadata["command"])
     command["sources"] = tuple(command["sources"])
     return replace(CommandSpec(**command), storybook=storybook, render=render, project_id=metadata["id"])

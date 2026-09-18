@@ -8,11 +8,11 @@ from pathlib import Path
 
 from . import __version__
 from .codex_agent import CodexError
-from .contracts import ContractError, parse_command_tokens
-from .models import RuntimeConfig
+from .contracts import ContractError, parse_command_tokens, parse_duration
+from .models import CommandSpec, RuntimeConfig
 from .pipeline import Pipeline
 from .production import ProductionError
-from .projects import find_project, resume_spec
+from .projects import create_original_project, find_project, resume_spec
 from .storage import read_json
 from .transcribe import TranscriptionError
 
@@ -24,8 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""ordered grammar:
   obscript [remix|split] [compress|extend] [topics|essay] <source>
+  obscript new [TITLE] [--format topics|essay] [--target-duration DURATION]
 
 examples:
+  obscript new
+  obscript new "Minha ideia" --target-duration 8m
   obscript VIDEO
   obscript compress essay VIDEO
   obscript remix extend topics VIDEO_A,VIDEO_B
@@ -43,7 +46,7 @@ is mandatory and has no translate modifier.
         "command",
         nargs="+",
         metavar="COMMAND",
-        help="ordered modifiers followed by a source, or an existing project ID",
+        help="new [TITLE], ordered modifiers followed by a source, or an existing project ID",
     )
     parser.add_argument(
         "--target-duration",
@@ -52,6 +55,8 @@ is mandatory and has no translate modifier.
     )
     parser.add_argument("--into", type=int, metavar="COUNT", help="desired split count")
     parser.add_argument("--project", help="Obsidian project folder name")
+    parser.add_argument("--format", choices=["source", "topics", "essay"],
+                        help="format metadata for a new manual script (default: topics)")
     parser.add_argument(
         "--output-dir",
         "--vault",
@@ -166,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command[0] == "new":
+            return _new_project(args)
+        if args.format is not None:
+            raise ContractError("--format is only valid with new; use a positional format modifier for source runs")
         project_root = find_project(args.output_dir.expanduser(), args.command[0]) if len(args.command) == 1 else None
         if project_root:
             if args.project or args.target_duration or args.into is not None:
@@ -221,4 +230,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     print("[obscript] revisão aprovada")
+    return 0
+
+
+def _new_project(args: argparse.Namespace) -> int:
+    if args.into is not None or args.storybook or args.render:
+        raise ContractError("new creates a manual draft; --into, --storybook, and --render are not supported")
+    title = " ".join(" ".join(args.command[1:]).split()) if len(args.command) > 1 else args.project or "Novo roteiro"
+    if not title.strip():
+        raise ContractError("the script title must not be empty")
+    spec = CommandSpec(pipeline="single", time_controller="normal", format=args.format or "topics",
+                       sources=(), target_duration_seconds=parse_duration(args.target_duration) if args.target_duration else 600)
+    if args.dry_run:
+        print("pipeline: create-original-project → script-template")
+        print(f"title: {title}")
+        print(f"format: {spec.format}")
+        print(f"target_duration_seconds: {spec.target_duration_seconds}")
+        return 0
+    output_dir = args.output_dir.expanduser().resolve()
+    direction_path = (args.creative_direction or output_dir / "Globals/creative-direction.md").expanduser().resolve()
+    root = create_original_project(output_dir, title, spec, direction_path, project_name=args.project)
+    print(f"[obscript] project ID: {read_json(root / 'project.json')['id']}")
+    print(f"[obscript] projeto: {root}")
+    print(f"[obscript] artefato: {root / 'script.md'}")
+    print("[obscript] rascunho original criado; escreva seu roteiro em script.md")
     return 0

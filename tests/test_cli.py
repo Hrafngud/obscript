@@ -6,11 +6,93 @@ import io
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
+from uuid import UUID
 
 from obscript.cli import build_parser, main
 from obscript.contracts import parse_command_tokens
 from obscript.projects import create_project
 from obscript.models import RuntimeConfig
+from obscript.storage import read_json, read_yaml
+
+
+class NewProjectTests(unittest.TestCase):
+    def test_new_creates_manual_project_without_external_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            transcripts = Path(directory) / "transcripts"
+            with patch("obscript.cli.Pipeline") as pipeline, patch("obscript.cli._resolve_codex") as codex:
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(main(["new", "A Ilusão da Programação", "--output-dir", str(vault),
+                                           "--transcripts-dir", str(transcripts), "--target-duration", "8m",
+                                           "--format", "essay"]), 0)
+                pipeline.assert_not_called()
+                codex.assert_not_called()
+            root = vault / "a-ilusao-da-programacao"
+            self.assertEqual({path.name for path in root.iterdir()}, {"project.json", "script.md", "run.yaml"})
+            metadata = read_json(root / "project.json")
+            UUID(metadata["id"])
+            self.assertIn(metadata["id"], output.getvalue())
+            self.assertEqual((metadata["origin"], metadata["status"], metadata["phase"]),
+                             ("original", "draft", "created"))
+            self.assertEqual(metadata["command"]["sources"], [])
+            self.assertEqual(metadata["command"]["target_duration_seconds"], 480)
+            self.assertEqual(metadata["creative_direction"], str(vault / "Globals/creative-direction.md"))
+            run = read_yaml(root / "run.yaml")
+            self.assertEqual(run["project_id"], metadata["id"])
+            self.assertEqual(run["sources"], [])
+            self.assertIsNone(run["agent"])
+            text = (root / "script.md").read_text()
+            self.assertTrue(text.startswith("---\n"))
+            for expected in ["language: pt-BR", "format: essay", "target_duration_seconds: 480",
+                             "# A Ilusão da Programação", "## Gancho", "## Desenvolvimento", "## Conclusão"]:
+                self.assertIn(expected, text)
+            self.assertFalse(transcripts.exists())
+
+    def test_bare_new_and_collisions_preserve_existing_drafts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["new", "--vault", directory]), 0)
+            first = Path(directory) / "novo-roteiro"
+            (first / "script.md").write_text("My own draft")
+            self.assertEqual(main(["new", "--vault", directory]), 0)
+            self.assertEqual((first / "script.md").read_text(), "My own draft")
+            second = Path(directory) / "novo-roteiro-2"
+            self.assertTrue((second / "script.md").exists())
+            self.assertNotEqual(read_json(first / "project.json")["id"], read_json(second / "project.json")["id"])
+            self.assertEqual(read_json(second / "project.json")["command"]["target_duration_seconds"], 600)
+
+    def test_project_name_and_creative_direction_override(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            direction = Path(directory) / "shared.md"
+            self.assertEqual(main(["new", "Título original", "--project", "Pasta personalizada",
+                                   "--creative-direction", str(direction), "--vault", directory]), 0)
+            root = Path(directory) / "pasta-personalizada"
+            self.assertIn("# Título original", (root / "script.md").read_text())
+            self.assertEqual(read_json(root / "project.json")["creative_direction"], str(direction))
+            self.assertFalse(direction.exists())
+
+    def test_dry_run_and_invalid_options_do_not_create_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main(["new", "--vault", str(vault), "--dry-run"]), 0)
+            self.assertIn("script-template", output.getvalue())
+            self.assertFalse(vault.exists())
+            for flags in [["--target-duration", "0"], ["--render"], ["--storybook"], ["--into", "2"]]:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main(["new", "--vault", str(vault), *flags]), 1)
+                self.assertFalse(vault.exists())
+
+    def test_original_project_resume_reports_manual_draft_without_import(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["new", "--vault", directory]), 0)
+            root = Path(directory) / "novo-roteiro"
+            project_id = read_json(root / "project.json")["id"]
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(main([project_id, "--storybook", "--vault", directory]), 1)
+                pipeline.assert_not_called()
+            self.assertIn("manual drafts", error.getvalue())
+            self.assertIn(str(root / "script.md"), error.getvalue())
+            self.assertEqual(read_json(root / "project.json")["status"], "draft")
 
 
 class CliDefaultsTests(unittest.TestCase):

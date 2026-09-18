@@ -1,6 +1,6 @@
 # obscript
 
-`obscript` turns video sources or existing transcripts into original Brazilian Portuguese video scripts, visual pre-production, and optionally rendered silent animations. Codex is the agent backend; `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
+`obscript` creates formatted projects for scripts you write from scratch, or turns video sources and existing transcripts into original Brazilian Portuguese video scripts, visual pre-production, and optionally rendered silent animations. Codex is the agent backend; `ytstt` supplies local speech-to-text. Every model stage reads and returns a structured intermediate representation instead of rewriting a transcript directly.
 
 ```text
 source → analyze-source → pipeline → time → format
@@ -32,7 +32,20 @@ The installer refuses to replace ordinary files or unrelated symlinks.
 
 ## CLI
 
-The positional grammar is fixed:
+Start an original script without a video or transcript:
+
+```bash
+obscript new
+obscript new "Minha ideia original" --target-duration 8m --format essay
+obscript new "Título do vídeo" --project "Nome da pasta" --vault /path/to/vault
+obscript new --dry-run
+```
+
+`new` creates a collision-safe project folder containing `script.md`, `project.json`, and `run.yaml`. Open `script.md` in Obsidian or your editor and replace the thesis and narration placeholders. The template uses the existing PT-BR Markdown front matter and includes hook, introduction, development, and conclusion sections. Its defaults are title `Novo roteiro`, format `topics`, and a 10-minute target; `--project` supplies the title when no positional title is given. `--format` accepts `source`, `topics`, or `essay` for this command.
+
+Original projects receive a permanent UUID, timestamps, shared creative-direction path, and `origin: original` / `status: draft` metadata. Their source list is empty. Creation needs neither ytstt nor Codex, does not create a transcripts directory, and does not require the shared creative-direction file to exist. These are manual drafts: `new` does not generate or review narration, and ID-based storybook/render processing is not supported for these projects. `--storybook`, `--render`, and `--into` are rejected with `new`. A dry run creates no files.
+
+For processing existing sources, the positional grammar is:
 
 ```text
 obscript [remix|split] [compress|extend] [topics|essay] <source>
