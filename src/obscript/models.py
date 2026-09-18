@@ -41,7 +41,7 @@ class RuntimeConfig:
     review_passes: int
     project_name: str | None
     verbose: bool
-    cookies_from_browser: str | None = None
+    cookies_from_browser: str | None = "firefox"
     cookies: Path | None = None
     creative_direction: Path | None = None
     harness: str = "codex"

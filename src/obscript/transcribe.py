@@ -122,8 +122,8 @@ def ingest_source(
     command = [str(ytstt), source, "--output-dir", str(batch), "--format", "txt,srt,json"]
     if cookies:
         command.extend(["--cookies", str(cookies)])
-    elif cookies_from_browser:
-        command.extend(["--cookies-from-browser", cookies_from_browser])
+    else:
+        command.extend(["--cookies-from-browser", cookies_from_browser or "firefox"])
     try:
         subprocess.run(command, check=True)
     except FileNotFoundError as exc:

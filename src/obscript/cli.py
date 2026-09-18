@@ -103,9 +103,9 @@ is mandatory and has no translate modifier.
     auth = parser.add_mutually_exclusive_group()
     auth.add_argument(
         "--cookies-from-browser",
-        default=os.environ.get("OBSCRIPT_COOKIES_FROM_BROWSER"),
+        default=os.environ.get("OBSCRIPT_COOKIES_FROM_BROWSER") or "firefox",
         metavar="BROWSER[:PROFILE]",
-        help="use a logged-in browser for YouTube; auto retries with a detected browser when blocked",
+        help="use browser cookies for every ytstt request (default: firefox)",
     )
     auth.add_argument(
         "--cookies", type=Path, metavar="FILE",

@@ -87,7 +87,7 @@ python3 scripts/install-ytstt-auth.py --apply
 
 The installer backs up `ytstt.py` before patching it and installs the versioned authentication adapter beside it. Omit `--apply` to review the diff; use `--ytstt-home PATH` for another installation. Reapply after a `ytstt` update if needed.
 
-With the adapter installed, YouTube bot-check or login errors trigger one retry with a detected browser's cookies (Firefox first, then other supported local browsers). Sign in to YouTube in Firefox. Authentication applies to both URL inspection and audio downloads, including individual playlist items; unrelated download errors are not retried. To choose a browser or profile explicitly:
+Obscript always passes `--cookies-from-browser firefox` to ytstt by default. With the adapter installed, Firefox cookies are loaded before the first request, for both URL inspection and audio downloads, including individual playlist items. Sign in to YouTube in Firefox. Reapply the installer above to update an already installed adapter. To choose a browser or profile explicitly:
 
 ```bash
 obscript 'https://www.youtube.com/watch?v=C3-FIM2xTIw' --render
@@ -96,7 +96,7 @@ obscript VIDEO --cookies-from-browser 'chrome:Default'
 obscript VIDEO --cookies /path/to/cookies.txt
 ```
 
-Set `OBSCRIPT_COOKIES_FROM_BROWSER=firefox` in your shell to persist a preference. Use `--cookies-from-browser none` to disable automatic authentication. Exported files must use Netscape cookie format. If YouTube rejects the cookies, refresh the browser login and retry; cookies cannot guarantee access against every YouTube restriction.
+Set `OBSCRIPT_COOKIES_FROM_BROWSER` in your shell to override the default browser. The legacy `auto` selector also uses Firefox from the first request. Use `--cookies-from-browser none` to explicitly disable cookies, or `--cookies FILE` to use an exported file instead. Exported files must use Netscape cookie format. If YouTube rejects the cookies, refresh the browser login and retry; cookies cannot guarantee access against every YouTube restriction.
 
 Without a target, `compress` aims at 60% of the model's recommended/source duration and `extend` at 150%. Without a time controller, the source or model-recommended duration is retained. Use `--dry-run` to validate a command without transcription or agent calls. `--dry-run --render` includes the production stages in the plan and makes no HyperFrames calls or media files.
 
