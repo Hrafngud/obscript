@@ -10,6 +10,8 @@ source → analyze-source → pipeline → time → format
        → storybook → validate-storybook
                                       ↓ --render
        → produce-video → package-production
+                                      ↓ PROJECT_ID --post-production
+       → validate-production → post-production → verify-post-production
 ```
 
 ## Install
@@ -65,6 +67,8 @@ obscript split topics VIDEO --into 4
 obscript split compress essay VIDEO --target-duration 8m
 obscript PROJECT_ID --storybook
 obscript PROJECT_ID --render
+obscript PROJECT_ID --post-production
+obscript PROJECT_ID --post-production --dry-run
 ```
 
 `remix` takes two or more comma-separated sources. A playlist URL is accepted as the single remix argument when `ytstt` expands it into at least two videos. A playlist without `remix` produces one independent script per item. `split` takes one non-playlist video. Translation is always conceptual PT-BR normalization during `analyze-source`; there is no `translate` modifier.
@@ -128,6 +132,11 @@ production/               # only with --render
     ...silent rendered scene media...
 production.yaml           # only after a render attempt
 video.mp4                 # silent animations, only after verified assembly
+post-production/          # optional polish pass; source production stays intact
+  hyperframes/            # editable copy with polished effects and transitions
+  report.md               # affected scenes, treatments, and visual checks
+post-production.yaml      # polish status, source hash, duration, output paths
+video-polished.mp4        # verified silent post-production result
 run.yaml
 project.json              # permanent ID, original command, phase and status
 .obscript/                 # exact JSON stage state and prompts
@@ -155,6 +164,14 @@ Você observa o padrão.
 
 Upstream changes archive stale derivatives under `.obscript/invalidated/`, removing them from current output. A script revision invalidates storybook, production, and the recorded direction reference (archiving legacy per-video direction files when present); a direction change invalidates storybook and production; a storybook change invalidates production. Changes to shared standards require `obscript PROJECT_ID --storybook` to rebuild affected scene plans before rendering; a content-hash check blocks rendering a storybook planned against different standards. Production checks that its upstream inputs remain unchanged and validates the returned scene artifacts before publication. An interrupted render with unchanged inputs retains its editable HyperFrames project and marks verified completed scene media for reuse; changed inputs archive previous production. A completed render is skipped only when its inputs and final video hash still match. There is no automatic filesystem watcher.
 
+`obscript PROJECT_ID --post-production` runs a separate visual finishing pass on a completed render. It requires an existing project ID and is mutually exclusive with `--storybook` and `--render`; `new` does not support it. The pass does not transcribe, rewrite, review, replan, or automatically perform the initial render. Every video in a split or playlist project must have a completed render, and all are checked before polishing begins. Stale approved inputs, changed shared standards or storybooks, missing editable source, changed original video, invalid scene media, or missing ffprobe block the pass. Rebuild changed standards with `--storybook`, then run `--render` before retrying.
+
+The dedicated `$post-production` agent inspects the existing video and edits a copy of `production/hyperframes/` under `post-production/hyperframes/`. It concentrates on flat or poorly polished moments: compatible vignettes and overlay textures, clearer element-focused effects, and varied transitions motivated by adjacent scenes. It may refine visual treatments and transitions in the copy while preserving narration, meaning, shared visual identity, scene order, and every planned boundary. The explicit flag authorizes local silent rendering after HyperFrames quality checks. The agent retains visual verification artifacts and a scene-by-scene `post-production/report.md`.
+
+The application preserves `video.mp4` and the source production project, checks source input hashes after execution, and verifies that the polished assembly contains video, contains no audio, and matches the total duration within one frame. Only a successful pass with a nonempty report publishes `video-polished.mp4`; `post-production.yaml` records completion or failure. Failed runs preserve partial editable work for retry with unchanged source inputs. A verified completed pass is reused while source inputs, polished video, and report hashes match. Source changes archive stale polish output under `.obscript/invalidated/`. Dry runs print only the post-production stages and create no files. One agent run executes each video's complete pass.
+
+The request and prompt remain in `.obscript/post-production.request.json` and `.obscript/post-production.prompt.txt`; the response and executor log remain in `post-production/` for inspection.
+
 ## Skills
 
 The versioned skill set is:
@@ -163,6 +180,7 @@ The versioned skill set is:
 analyze-source      remix       compress      topics      plan-script
 translate-context   split       extend        essay       write-script
 review-script       creative-direction       storybook       produce-video
+post-production
 obscript-parse-script
 ```
 

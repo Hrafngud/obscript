@@ -96,6 +96,38 @@ class NewProjectTests(unittest.TestCase):
 
 
 class CliDefaultsTests(unittest.TestCase):
+    def test_post_production_requires_project_and_is_exclusive(self) -> None:
+        self.assertTrue(build_parser().parse_args(["PROJECT_ID", "--post-production"]).post_production)
+        for flag in ["--render", "--storybook"]:
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                build_parser().parse_args(["PROJECT_ID", "--post-production", flag])
+        with tempfile.TemporaryDirectory() as directory, patch("obscript.cli.Pipeline") as pipeline:
+            for command in ["VIDEO", "new"]:
+                with contextlib.redirect_stderr(io.StringIO()) as error:
+                    self.assertEqual(main([command, "--post-production", "--vault", directory]), 1)
+                self.assertIn("--post-production", error.getvalue())
+            pipeline.assert_not_called()
+
+    def test_post_production_resume_and_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main([metadata["id"], "--post-production", "--dry-run", "--vault", directory]), 0)
+                pipeline.assert_not_called()
+                self.assertIn("validate-production → post-production → verify-post-production", output.getvalue())
+                self.assertNotIn("analyze-source", output.getvalue())
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()):
+                result = pipeline.return_value.run.return_value
+                result.passed_review = True
+                result.outputs = []
+                self.assertEqual(main([metadata["id"], "--post-production", "--vault", directory]), 0)
+                spec = pipeline.return_value.run.call_args.args[0]
+                self.assertTrue(spec.post_production)
+                self.assertFalse(spec.render)
+                self.assertEqual(spec.project_id, metadata["id"])
+
     def test_storybook_and_render_are_exclusive(self) -> None:
         self.assertTrue(build_parser().parse_args(["VIDEO", "--storybook"]).storybook)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

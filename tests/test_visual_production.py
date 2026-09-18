@@ -310,6 +310,40 @@ class PipelineVisualTests(unittest.TestCase):
                 for number in [1, 2]:
                     self.assertTrue((result.project_root / f"video-{number:02d}/storybook.yaml").exists())
 
+    def test_post_production_skips_upstream_for_all_units(self):
+        result = self.run_pipeline(["split", "source"], render=True)
+        FakePlanningAgent.calls.clear()
+        spec = resume_spec(result.project_root, storybook=False, render=False, post_production=True)
+        with patch("obscript.pipeline.PostProductionAgent") as polisher:
+            polisher.return_value.polish.return_value = Path("video-polished.mp4")
+            resumed = Pipeline(config_fixture(self.root)).run(spec)
+            self.assertEqual(polisher.call_count, 2)
+            self.assertEqual(polisher.return_value.validate_inputs.call_count, 2)
+            self.assertEqual(polisher.return_value.polish.call_count, 2)
+        self.assertFalse(FakePlanningAgent.calls)
+        self.ingest.assert_called_once()
+        self.assertEqual(len(resumed.outputs), 6)
+        metadata = read_json(result.project_root / "project.json")
+        self.assertEqual(metadata["phase"], "post-production")
+        self.assertEqual(set(metadata["units"].values()), {"post-production"})
+
+    def test_post_production_requires_completed_render(self):
+        result = self.run_pipeline()
+        spec = resume_spec(result.project_root, storybook=False, render=False, post_production=True)
+        with patch("obscript.pipeline.PostProductionAgent") as polisher:
+            with self.assertRaisesRegex(ContractError, "completed render"):
+                Pipeline(config_fixture(self.root)).run(spec)
+            polisher.assert_not_called()
+
+    def test_post_production_preflights_all_units_before_execution(self):
+        result = self.run_pipeline(["split", "source"], render=True)
+        spec = resume_spec(result.project_root, storybook=False, render=False, post_production=True)
+        with patch("obscript.pipeline.PostProductionAgent") as polisher:
+            polisher.return_value.validate_inputs.side_effect = [None, ProductionError("stale second video")]
+            with self.assertRaisesRegex(ProductionError, "stale second video"):
+                Pipeline(config_fixture(self.root)).run(spec)
+            polisher.return_value.polish.assert_not_called()
+
     def test_direction_change_blocks_render_until_storybook_rebuilt(self):
         result = self.run_pipeline()
         self.direction.write_text("# Changed standards")

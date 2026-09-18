@@ -37,6 +37,7 @@ examples:
   obscript extend essay VIDEO --render
   obscript VIDEO --storybook
   obscript PROJECT_ID --render
+  obscript PROJECT_ID --post-production
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
 is mandatory and has no translate modifier.
@@ -130,6 +131,10 @@ is mandatory and has no translate modifier.
         "--render", action="store_true",
         help="render silent animations through the installed HyperFrames skill",
     )
+    phase.add_argument(
+        "--post-production", action="store_true",
+        help="polish an existing project's completed render with effects and varied transitions",
+    )
     parser.add_argument("--verbose", action="store_true", help="stream Codex CLI output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -145,6 +150,11 @@ def _resolve_codex(requested: Path | None) -> Path:
 
 
 def _print_dry_run(spec, project_root: Path | None = None) -> None:
+    if spec.post_production:
+        print(f"resume project: {spec.project_id} ({project_root})")
+        print("pipeline: validate-production → post-production → verify-post-production")
+        print("requires a completed render; preserves the original video and upstream inputs")
+        return
     stages = ["ytstt/source import", "analyze-source"]
     if spec.pipeline != "single":
         stages.append(spec.pipeline)
@@ -179,10 +189,13 @@ def main(argv: list[str] | None = None) -> int:
         if project_root:
             if args.project or args.target_duration or args.into is not None:
                 raise ContractError("Resuming a project retains its name, duration, and split settings; omit --project, --target-duration, and --into")
-            spec = resume_spec(project_root, storybook=args.storybook, render=args.render)
+            spec = resume_spec(project_root, storybook=args.storybook, render=args.render,
+                               post_production=args.post_production)
             if args.creative_direction is None:
                 args.creative_direction = Path(read_json(project_root / "project.json")["creative_direction"])
         else:
+            if args.post_production:
+                raise ContractError("--post-production requires an existing project ID; render the project with --render first")
             spec = parse_command_tokens(
                 args.command,
                 target_duration=args.target_duration,
@@ -234,8 +247,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _new_project(args: argparse.Namespace) -> int:
-    if args.into is not None or args.storybook or args.render:
-        raise ContractError("new creates a manual draft; --into, --storybook, and --render are not supported")
+    if args.into is not None or args.storybook or args.render or args.post_production:
+        raise ContractError("new creates a manual draft; --into, --storybook, --render, and --post-production are not supported")
     title = " ".join(" ".join(args.command[1:]).split()) if len(args.command) > 1 else args.project or "Novo roteiro"
     if not title.strip():
         raise ContractError("the script title must not be empty")

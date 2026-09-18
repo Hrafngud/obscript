@@ -15,6 +15,7 @@ class CommandSpec:
     render: bool = False
     storybook: bool = False
     project_id: str | None = None
+    post_production: bool = False
 
 
 @dataclass(frozen=True)

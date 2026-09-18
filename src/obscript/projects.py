@@ -89,14 +89,15 @@ def create_original_project(output_dir: Path, title: str, spec: CommandSpec,
     return root
 
 
-def resume_spec(root: Path, *, storybook: bool, render: bool) -> CommandSpec:
+def resume_spec(root: Path, *, storybook: bool, render: bool, post_production: bool = False) -> CommandSpec:
     metadata = read_json(root / "project.json")
     if metadata.get("origin") == "original":
         raise ContractError(f"Original projects are manual drafts; edit {root / 'script.md'}. "
                             "They do not have reviewed structured checkpoints for storybook or rendering.")
     command = dict(metadata["command"])
     command["sources"] = tuple(command["sources"])
-    return replace(CommandSpec(**command), storybook=storybook, render=render, project_id=metadata["id"])
+    return replace(CommandSpec(**command), storybook=storybook, render=render,
+                   post_production=post_production, project_id=metadata["id"])
 
 
 def update_project(root: Path, *, phase: str | None = None, unit: Path | None = None,
@@ -106,7 +107,7 @@ def update_project(root: Path, *, phase: str | None = None, unit: Path | None = 
     if phase:
         if unit is not None:
             metadata["units"][unit.relative_to(root).as_posix()] = phase
-            phases = ["created", "transcript", "script", "storybook", "render"]
+            phases = ["created", "transcript", "script", "storybook", "render", "post-production"]
             metadata["phase"] = min(metadata["units"].values(), key=phases.index)
         else:
             metadata["phase"] = phase

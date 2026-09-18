@@ -12,6 +12,7 @@ from .contracts import ContractError, choose_target_duration
 from .models import CommandSpec, RuntimeConfig
 from .projects import create_project, find_project, update_project
 from .production import ProductionAgent, invalidate_downstream, validate_storybook
+from .post_production import PostProductionAgent
 from .storage import (
     copy_if_present,
     file_sha256,
@@ -52,6 +53,8 @@ class Pipeline:
         self.config = config
 
     def run(self, spec: CommandSpec) -> PipelineResult:
+        if spec.post_production and not spec.project_id:
+            raise ContractError("Post-production requires an existing project ID")
         if spec.project_id:
             project_root = find_project(self.config.output_dir, spec.project_id)
             if project_root is None:
@@ -71,13 +74,15 @@ class Pipeline:
         except Exception as exc:
             update_project(project_root, status="failed", error=str(exc))
             raise
-        phase = "render" if spec.render else "storybook" if spec.storybook else "script"
+        phase = "post-production" if spec.post_production else "render" if spec.render else "storybook" if spec.storybook else "script"
         update_project(project_root, phase=phase if result.passed_review else None,
                        status="complete" if result.passed_review else "needs_review",
                        creative_direction=self.config.creative_direction_path)
         return result
 
     def _run(self, spec: CommandSpec, project_root: Path) -> PipelineResult:
+        if spec.post_production:
+            return self._run_post_production(project_root)
         direction_path = self.config.creative_direction_path
         direction = read_creative_direction(direction_path) if spec.storybook or spec.render else None
         sources = self._import_sources(spec, project_root)
@@ -250,6 +255,28 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                     outputs.append(unit_dir / "production.yaml")
                     update_project(project_root, phase="render", unit=unit_dir)
         return PipelineResult(project_root, tuple(outputs), all_passed)
+
+    def _run_post_production(self, project_root: Path) -> PipelineResult:
+        metadata = read_json(project_root / "project.json")
+        units = metadata.get("units", {})
+        if not units or any(phase not in {"render", "post-production"} for phase in units.values()):
+            raise ContractError("Post-production requires a completed render for every video; run PROJECT_ID --render first")
+        unit_dirs = []
+        for name in units:
+            unit_dir = (project_root / name).resolve()
+            if not unit_dir.is_relative_to(project_root.resolve()):
+                raise ContractError("Invalid production unit path")
+            unit_dirs.append(unit_dir)
+        # Validate every unit before invoking a side-effecting executor.
+        agents = [PostProductionAgent(self.config, unit_dir) for unit_dir in unit_dirs]
+        for agent in agents:
+            agent.validate_inputs()
+        outputs = []
+        for unit_dir, agent in zip(unit_dirs, agents):
+            outputs.append(agent.polish())
+            outputs.extend([unit_dir / "post-production.yaml", unit_dir / "post-production/report.md"])
+            update_project(project_root, phase="post-production", unit=unit_dir)
+        return PipelineResult(project_root, tuple(outputs), True)
 
     def _import_sources(self, spec: CommandSpec, project_root: Path) -> list[str]:
         checkpoint = project_root / ".obscript/imports.json"
