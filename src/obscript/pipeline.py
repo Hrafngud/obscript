@@ -573,6 +573,10 @@ Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
 Cover every narration word exactly once in original section order, as contiguous exact excerpts.
 No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
 Production is silent animations only. Narration excerpts are timing references for a human reader.
+Write scene and production directions in English; preserve narration verbatim and keep on-screen labels in the script's language unless shared direction specifies otherwise.
+Describe visible elements, positions, asset references, backgrounds, and timed motion, without re-explaining the narration.
+Make each render_brief a concise, self-contained imperative paragraph covering the complete scene and its transition.
+Use supplied asset paths exactly; identify assets needing sourcing or creation instead of inventing existing files.
 Do not request audio, TTS, music, sound effects, or automatic subtitles. Scene timestamps govern rendering.
 Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
             )

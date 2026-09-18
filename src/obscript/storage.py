@@ -173,24 +173,25 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
     """Render an Obsidian-readable scene plan, including inspectable invalid drafts."""
     status = "invalid" if validation_error is not None else "validated"
     lines = [
-        "---", "language: pt-BR", f"status: {status}",
+        "---", "language: en", f"status: {status}",
         f"target_duration_seconds: {storybook.get('target_duration_seconds', 0)}", "---", "",
         f"# Storybook · {script['title']}", "",
     ]
     if validation_error is not None:
-        lines.extend(["**Rascunho não validado — produção bloqueada.**", "", f"Erro: {validation_error}", ""])
+        lines.extend(["**Unvalidated draft — production blocked.**", "", f"Error: {validation_error}", ""])
     else:
-        lines.extend(["**Plano validado para animações silenciosas.**", ""])
+        lines.extend(["**Validated plan for silent animations.**", ""])
     direction_link = ""
     if direction_path is not None:
         # The caller supplies a path relative to the document for Obsidian links.
-        direction_link = f" · [Direção criativa compartilhada](<{direction_path.as_posix()}>)"
+        direction_link = f" · [Shared creative direction](<{direction_path.as_posix()}>)"
     lines.extend([
-        f"[Roteiro com tempos](script.md){direction_link}", "",
-        "A narração abaixo é referência para gravação humana. As animações seguem os intervalos indicados.", "",
-        "## Linha do tempo", "",
-        "| Cena | Seção | Início | Fim | Duração | Objetivo visual |",
-        "| --- | --- | --- | --- | --- | --- |",
+        f"[Script with timestamps](script.md){direction_link}", "",
+        "Scene directions are in English; narration and on-screen labels retain their original language.", "",
+        "[Structured production plan](storybook.yaml) contains the exact narration references and all scene fields.", "",
+        "## Timeline", "",
+        "| Scene | Section | Start | End | Duration |",
+        "| --- | --- | --- | --- | --- |",
     ])
 
     def cell(value: Any) -> str:
@@ -206,7 +207,7 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
         try:
             return format_timestamp(float(value))
         except (ValueError, TypeError, OverflowError):
-            return f"Tempo inválido: {value}"
+            return f"Invalid time: {value}"
 
     scenes = [scene for scene in items(storybook.get("scenes")) if isinstance(scene, dict)]
     for scene in scenes:
@@ -214,7 +215,7 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
         start = timestamp(timing.get("estimated_start_seconds", 0))
         end = timestamp(timing.get("estimated_end_seconds", 0))
         duration = mapping(scene.get("voiceover")).get("estimated_seconds", "—")
-        lines.append(f"| {cell(scene.get('id', '—'))} | {cell(scene.get('script_section_id', '—'))} | {start} | {end} | {duration} s | {cell(scene.get('visual_goal', '—'))} |")
+        lines.append(f"| {cell(scene.get('id', '—'))} | {cell(scene.get('script_section_id', '—'))} | {start} | {end} | {duration} s |")
     lines.append("")
     sections = {section["id"]: section["title"] for section in script["sections"]}
     for scene in scenes:
@@ -224,42 +225,13 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
         section_id = str(scene.get("script_section_id", "—"))
         voiceover = mapping(scene.get("voiceover"))
         lines.extend([
-            f"## {scene.get('id', 'Cena')} · {start} → {end}", "",
-            f"**Seção:** {section_id} · {sections.get(section_id, 'Seção desconhecida')}", "",
-            f"**Duração:** {voiceover.get('estimated_seconds', '—')} s", "",
-            f"**Momento narrativo:** {scene.get('narrative_beat', '—')}", "",
-            f"**Objetivo visual:** {scene.get('visual_goal', '—')}", "",
-            "### Narração de referência", "", voiceover.get("text", "—"), "",
-            "### Composição", "",
+            f"## {scene.get('id', 'Scene')} · {start} → {end}", "",
+            f"**Section:** {section_id} · {sections.get(section_id, 'Unknown section')}", "",
+            f"**Duration:** {voiceover.get('estimated_seconds', '—')} s", "",
+            "### Scene", "",
+            "**Layout:**", "", scene.get("render_brief", "—"), "",
         ])
-        composition = mapping(scene.get("composition"))
-        for key, label in [("layout", "Layout"), ("focal_element", "Elemento focal")]:
-            lines.extend([f"**{label}:** {composition.get(key, '—')}", ""])
-        for element in items(composition.get("supporting_elements")):
-            lines.append(f"- {element}")
-        lines.extend(["", "### Elementos visuais", ""])
-        for element in items(scene.get("visual_elements")):
-            element = mapping(element)
-            lines.extend([f"- **{element.get('type', '—')}:** {element.get('content', '—')} — {element.get('role', '—')}"])
-        lines.extend(["", "### Texto na tela", ""])
-        blocks = items(scene.get("onscreen_text"))
-        if not blocks:
-            lines.append("Nenhum.")
-        for block in blocks:
-            block = mapping(block)
-            lines.append(f"- {block.get('text', '—')} — {block.get('purpose', '—')}")
-        lines.extend(["", "### Animação", ""])
-        animation = mapping(scene.get("animation"))
-        for key, label in [("entrance", "Entrada"), ("continuous", "Movimento contínuo"),
-                           ("emphasis", "Ênfase"), ("exit", "Saída"), ("camera", "Câmera")]:
-            lines.extend([f"**{label}:** {animation.get(key, '—')}", ""])
-        lines.extend(["### Transição para a próxima cena", "", scene.get("transition_out", "—"), "",
-                      "### Recursos necessários", ""])
-        assets = items(scene.get("asset_requirements"))
-        if not assets:
-            lines.append("Nenhum recurso externo.")
-        for asset in assets:
-            asset = mapping(asset)
-            lines.append(f"- **{asset.get('type', '—')}:** {asset.get('description', '—')}")
-        lines.extend(["", "### Instrução de produção", "", scene.get("render_brief", "—"), ""])
+    if validation_error is not None:
+        lines.extend(["## Invalid structured draft", "", "```json",
+                      json.dumps(storybook, ensure_ascii=False, indent=2), "```", ""])
     return "\n".join(str(line) for line in lines).rstrip() + "\n"

@@ -230,7 +230,8 @@
           },
           "render_brief": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Self-contained English paragraph displayed as the readable scene's Layout: imperative directions for concrete elements, supplied asset paths or named asset requirements, positions, exact on-screen labels in their intended language, background, scene-local motion timing, camera behavior, and transition. Describe visible actions without re-explaining narration; agree with all structured scene fields."
           }
         }
       },

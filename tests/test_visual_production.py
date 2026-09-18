@@ -343,7 +343,7 @@ class PipelineVisualTests(unittest.TestCase):
         stages = [stage for stage, _ in FakePlanningAgent.calls]
         self.assertIn("storybook-01", stages)
         self.assertNotIn("storybook-02", stages)
-        self.assertIn(label, (result.project_root / "storybook.md").read_text())
+        self.assertEqual(load_yaml(result.project_root / "storybook.yaml")["scenes"][0]["onscreen_text"][0]["text"], label)
         self.assertTrue((result.project_root / "storybook.yaml").exists())
 
     def test_storybook_preproduction_without_media_calls(self):
@@ -438,7 +438,7 @@ class PipelineVisualTests(unittest.TestCase):
         draft = draft_path.read_text()
         self.assertIn("status: invalid", draft)
         self.assertIn("voiceover differs from approved narration", draft)
-        self.assertIn("produção bloqueada", draft)
+        self.assertIn("production blocked", draft)
 
     def test_split_and_playlist_units_own_all_visual_state(self):
         for tokens, playlist in [(["split", "source"], False), (["source"], True)]:
@@ -735,20 +735,26 @@ class ProductionExecutionTests(unittest.TestCase):
 
 
 class InvalidationAndDryRunTests(unittest.TestCase):
-    def test_readable_storybook_includes_the_complete_scene_plan(self):
+    def test_readable_storybook_focuses_on_scene_directions(self):
         script, story = script_fixture(), story_fixture()
-        story["scenes"][0]["animation"]["camera"] = "Avance lentamente até o nó central."
-        story["scenes"][0]["asset_requirements"] = [{"type": "image", "description": "Ilustração do nó"}]
+        story["scenes"][0]["render_brief"] = (
+            "Place /icons/node.svg in the center. At 1 second, fade in a pill labeled 'Padrão' "
+            "to its right over 0.4 seconds. Zoom toward the node, then end with a hard cut."
+        )
         text = render_storybook(story, script)
         self.assertIn("status: validated", text)
-        self.assertIn("[Roteiro com tempos](script.md)", text)
-        self.assertIn("## Linha do tempo", text)
-        self.assertIn("Avance lentamente até o nó central.", text)
-        self.assertIn("Ilustração do nó", text)
+        self.assertIn("language: en", text)
+        self.assertIn("[Script with timestamps](script.md)", text)
+        self.assertIn("[Structured production plan](storybook.yaml)", text)
+        self.assertIn("**Section:** hook · hook", text)
+        self.assertIn("**Duration:** 3 s", text)
+        self.assertIn("### Scene\n\n**Layout:**", text)
         for scene in story["scenes"]:
             self.assertIn(f"## {scene['id']} ·", text)
-            self.assertIn(scene["voiceover"]["text"], text)
+            self.assertNotIn(scene["voiceover"]["text"], text)
             self.assertIn(scene["render_brief"], text)
+            self.assertNotIn(scene["narrative_beat"], text)
+            self.assertNotIn(scene["visual_goal"], text)
         self.assertIn("00:00:09.000 → 00:00:12.000", text)
 
     def test_invalid_structure_still_has_an_inspectable_markdown_draft(self):
@@ -761,8 +767,10 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         text = render_storybook(story, script_fixture(), validation_error="Invalid scene structure")
         self.assertIn("status: invalid", text)
         self.assertIn("Invalid scene structure", text)
-        self.assertIn("Tempo inválido", text)
+        self.assertIn("Invalid time", text)
         self.assertIn("scene-004", text)
+        self.assertIn('"script_section_id": [', text)
+        self.assertIn(scene["voiceover"]["text"], text)
 
     def test_human_reading_cues_preserve_all_approved_narration(self):
         script, story = script_fixture(), story_fixture()
