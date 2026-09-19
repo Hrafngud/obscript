@@ -615,6 +615,8 @@ Write scene and production directions in English; preserve narration verbatim an
 Describe visible elements, positions, asset references, backgrounds, and timed motion, without re-explaining the narration.
 Make each render_brief a concise, self-contained imperative paragraph covering the complete scene and its transition.
 Use supplied asset paths exactly; identify assets needing sourcing or creation instead of inventing existing files.
+Use a verified raster image from the local assets/background1 collection as a visible full-frame or substantial background region in at least ceil(total scene count / 5) scenes, with a minimum of one. Distribute those scenes through the video. Tiny accents do not count.
+Never generate, request, or use SVG backgrounds; SVG assets are allowed only as foreground icons or illustrations.
 Do not request audio, TTS, music, sound effects, or automatic subtitles. Scene timestamps govern rendering.
 Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
             )

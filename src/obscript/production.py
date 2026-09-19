@@ -159,6 +159,7 @@ Narration is a timing reference for a human reader. Never generate, source, mix,
 The user explicitly authorized rendering with --render; continue after required quality checks.
 Preserve storybook timestamps and durations, including during transitions and assembly.
 Keep approved narration, scene order, section binding, creative direction, and meaning immutable.
+Implement every planned raster background from assets/background1, preserving at least the complete storybook's one-in-five scene coverage. Never generate, hand-author, or use an SVG as a background; SVGs are foreground assets only.
 Create durable media only in {output_dir}. Do not modify upstream files or production.yaml.
 Do not claim success until requested local artifacts exist. Report errors clearly.
 """

@@ -162,6 +162,7 @@ class StorybookValidationTests(unittest.TestCase):
 
 class FakePlanningAgent:
     calls: list[tuple[str, Path]] = []
+    prompts: list[tuple[str, str]] = []
     verdicts: list[str] = []
     invalid_storybooks = 0
     split_parts = 2
@@ -175,6 +176,7 @@ class FakePlanningAgent:
     def run(self, *, stage, skill, prompt, schema):
         self.counter += 1
         self.calls.append((stage, self.root))
+        self.prompts.append((stage, prompt))
         if skill == "analyze-source" or skill == "remix":
             value = {"recommended_duration_seconds": 12, "sources": [{"title": "Fonte"}], "summary": {"thesis": "Tese"}}
         elif skill == "split":
@@ -214,6 +216,7 @@ class PipelineVisualTests(unittest.TestCase):
         self.transcript.write_text("Fonte")
         self.asset = SourceAsset("source", "Fonte", self.transcript, None, None, "pt-BR", 12)
         FakePlanningAgent.calls = []
+        FakePlanningAgent.prompts = []
         FakePlanningAgent.verdicts = []
         FakePlanningAgent.invalid_storybooks = 0
         self.addCleanup(patch.stopall)
@@ -255,6 +258,14 @@ class PipelineVisualTests(unittest.TestCase):
         self.producer.assert_not_called()
         self.assertEqual(read_json(result.project_root / "project.json")["id"], identity)
         self.assertEqual(read_json(result.project_root / "project.json")["phase"], "storybook")
+
+    def test_storybook_prompt_requires_raster_background_coverage_and_forbids_svg_backgrounds(self):
+        self.run_pipeline()
+        prompt = next(prompt for stage, prompt in FakePlanningAgent.prompts if stage == "storybook-01")
+        self.assertIn("assets/background1", prompt)
+        self.assertIn("ceil(total scene count / 5)", prompt)
+        self.assertIn("Tiny accents do not count", prompt)
+        self.assertIn("Never generate, request, or use SVG backgrounds", prompt)
 
     def test_switch_to_opencode_reuses_approved_codex_script(self):
         result = self.run_pipeline(storybook=False)
@@ -892,8 +903,10 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertNotIn("--output-schema", command)
         self.assertIn("$hyperframes", run.call_args.kwargs["input"])
         self.assertIn("Do not launch nested agent harness runs", run.call_args.kwargs["input"])
+        self.assertIn("assets/background1", run.call_args.kwargs["input"])
+        self.assertIn("one-in-five scene coverage", run.call_args.kwargs["input"])
+        self.assertIn("Never generate, hand-author, or use an SVG as a background", run.call_args.kwargs["input"])
         self.assertTrue((output / "executor.log").exists())
-
 
 class InvalidationAndDryRunTests(unittest.TestCase):
     def test_readable_storybook_focuses_on_scene_directions(self):
