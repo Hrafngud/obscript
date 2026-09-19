@@ -46,6 +46,8 @@ class RuntimeConfig:
     creative_direction: Path | None = None
     harness: str = "codex"
     opencode: Path | None = None
+    render_batch_size: int = 20
+    post_production_batch_size: int = 20
 
     @property
     def agent_executable(self) -> Path:

@@ -142,6 +142,18 @@ is mandatory and has no translate modifier.
         "--post-production", action="store_true",
         help="polish an existing project's completed render with effects and varied transitions",
     )
+    parser.add_argument(
+        "--render-batch-size",
+        type=int,
+        metavar="SCENES",
+        help="maximum scenes per render iteration (default: 20; requires --render)",
+    )
+    parser.add_argument(
+        "--post-production-batch-size",
+        type=int,
+        metavar="SCENES",
+        help="maximum scenes per post-production iteration (default: 20; requires --post-production)",
+    )
     parser.add_argument("--verbose", action="store_true", help="show agent CLI output")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -199,6 +211,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.opencode_bin and not args.opencode:
             raise ContractError("--opencode-bin requires --opencode")
+        if args.render_batch_size is not None and not args.render:
+            raise ContractError("--render-batch-size requires --render")
+        if args.render_batch_size is not None and args.render_batch_size < 1:
+            raise ContractError("--render-batch-size must be at least 1")
+        if args.post_production_batch_size is not None and not args.post_production:
+            raise ContractError("--post-production-batch-size requires --post-production")
+        if args.post_production_batch_size is not None and args.post_production_batch_size < 1:
+            raise ContractError("--post-production-batch-size must be at least 1")
         if args.command[0] == "new":
             return _new_project(args)
         if args.format is not None:
@@ -225,6 +245,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ContractError("--review-passes must be at least 1")
         if args.dry_run:
             _print_dry_run(spec, project_root)
+            if spec.render:
+                print(f"render_batch_size: {args.render_batch_size or 20}")
+            if spec.post_production:
+                print(f"post_production_batch_size: {args.post_production_batch_size or 20}")
             print(f"agent: {'OpenCode CLI' if args.opencode else 'Codex CLI'}")
             return 0
 
@@ -256,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             creative_direction=args.creative_direction,
             harness="opencode" if args.opencode else "codex",
             opencode=opencode,
+            render_batch_size=args.render_batch_size or 20,
+            post_production_batch_size=args.post_production_batch_size or 20,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:

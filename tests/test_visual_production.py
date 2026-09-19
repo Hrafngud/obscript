@@ -566,7 +566,12 @@ class ProductionExecutionTests(unittest.TestCase):
         if self.mutate:
             self.paths["script"].write_text("changed upstream")
         self.assertEqual(request["operation"], "video")
-        self.assertEqual(request["storybook"], story_fixture())
+        expected_story = story_fixture()
+        self.assertEqual(request["storybook"]["schema_version"], expected_story["schema_version"])
+        self.assertEqual(request["storybook"]["target_duration_seconds"], expected_story["target_duration_seconds"])
+        expected_scenes = {scene["id"]: scene for scene in expected_story["scenes"]}
+        self.assertEqual(request["storybook"]["scenes"],
+                         [expected_scenes[scene["id"]] for scene in request["storybook"]["scenes"]])
         self.assertEqual(request["audio_policy"], "none")
         self.assertFalse(request["hyperframes"]["render"]["audio"])
         self.assertEqual(request["hyperframes"]["brief"]["narration"], "no")
@@ -654,13 +659,88 @@ class ProductionExecutionTests(unittest.TestCase):
         original_executor = self.execute_fixture
         def retry(stage, request_path, output_dir):
             request = read_json(request_path)
-            self.assertEqual([item["reuse_existing"] for item in request["scene_outputs"]], [True, False, False, False])
-            self.assertEqual(read_json(Path(request["scene_outputs"][0]["manifest"]))["status"], "complete")
+            self.assertEqual([item["scene_id"] for item in request["scene_outputs"]],
+                             ["scene-002", "scene-003", "scene-004"])
+            self.assertFalse(any(item["reuse_existing"] for item in request["scene_outputs"]))
+            self.assertEqual(read_json(Path(request["assembly"]["scene_outputs"][0]["manifest"]))["status"], "complete")
             original_executor(stage, request_path, output_dir)
         with patch.object(self.agent, "_execute", side_effect=retry), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
             self.produce()
         self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
         self.assertFalse((self.root / ".obscript/invalidated").exists())
+
+    def _install_many_scene_fixture(self, count: int, *, batch_size: int = 20) -> None:
+        words = [f"palavra{order}" for order in range(1, count + 1)]
+        script = script_fixture()
+        script["metadata"]["target_duration_seconds"] = count
+        script["sections"] = [{
+            "id": "body", "title": "body", "type": "body", "purpose": "Explicar",
+            "topic_refs": [], "estimated_seconds": count, "narration": " ".join(words),
+        }]
+        story = {
+            "schema_version": "2", "target_duration_seconds": count,
+            "scenes": [scene_fixture(order, "body", word) for order, word in enumerate(words, 1)],
+        }
+        for order, scene in enumerate(story["scenes"], 1):
+            scene["voiceover"]["estimated_seconds"] = 1
+            scene["timing"] = {"estimated_start_seconds": order - 1, "estimated_end_seconds": order}
+            scene["transition_out"] = "Corte direto" if order < count else "Nenhuma"
+        write_json(self.paths["script"], script)
+        write_json(self.paths["storybook"], story)
+        self.agent = ProductionAgent(replace(config_fixture(self.root), render_batch_size=batch_size), self.root)
+        self.duration = float(count)
+        self.scene_duration = 1.0
+
+    def _batched_executor(self, stage, request_path, output_dir):
+        self.calls.append(stage)
+        request = read_json(request_path)
+        scenes = request["storybook"]["scenes"]
+        self.assertLessEqual(len(scenes), request["batch"]["configured_scene_limit"])
+        self.assertEqual([scene["id"] for scene in scenes], request["batch"]["scene_ids"])
+        self.assertEqual([scene["id"] for scene in scenes],
+                         [output["scene_id"] for output in request["scene_outputs"]])
+        for scene, output in zip(scenes, request["scene_outputs"]):
+            scene_dir = Path(output["output_directory"])
+            (scene_dir / "scene.mp4").write_bytes(b"scene fixture")
+            write_json(Path(output["manifest"]), {
+                "scene_id": scene["id"], "script_section_id": scene["script_section_id"],
+                "generator": "hyperframes", "status": "complete",
+                "estimated_duration_seconds": 1, "actual_duration_seconds": 1,
+                "output_files": ["scene.mp4"],
+            })
+        if request["batch"]["assemble_final"]:
+            self.assertTrue(request["assembly"]["requested"])
+            self.assertEqual(len(request["assembly"]["scene_outputs"]), self.duration)
+            Path(request["output_video"]).write_bytes(b"assembled fixture")
+        else:
+            self.assertFalse(request["assembly"]["requested"])
+            self.assertEqual(request["assembly"]["scene_outputs"], [])
+            self.assertIsNone(request["output_video"])
+
+    def test_default_render_batches_75_scenes_as_20_20_20_15(self):
+        self._install_many_scene_fixture(75)
+        with patch.object(self.agent, "_execute", side_effect=self._batched_executor), \
+             patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+             patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.produce()
+        self.assertEqual(self.calls, [
+            "produce-video-01-of-04", "produce-video-02-of-04",
+            "produce-video-03-of-04", "produce-video-04-of-04",
+        ])
+        requests = [read_json(path) for path in sorted((self.root / ".obscript").glob("produce-video-*.request.json"))]
+        self.assertEqual([len(request["storybook"]["scenes"]) for request in requests], [20, 20, 20, 15])
+        self.assertEqual([request["batch"]["assemble_final"] for request in requests], [False, False, False, True])
+        self.assertEqual(load_yaml(self.root / "production.yaml")["render_batch_size"], 20)
+
+    def test_custom_render_batch_size_keeps_short_remainder(self):
+        self._install_many_scene_fixture(5, batch_size=2)
+        with patch.object(self.agent, "_execute", side_effect=self._batched_executor), \
+             patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+             patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.produce()
+        requests = [read_json(path) for path in sorted((self.root / ".obscript").glob("produce-video-*.request.json"))]
+        self.assertEqual([len(request["storybook"]["scenes"]) for request in requests], [2, 2, 1])
+        self.assertTrue(requests[-1]["batch"]["assemble_final"])
 
     def test_changed_render_inputs_archive_partial_work(self):
         self.failure = "scene-002"

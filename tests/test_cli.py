@@ -96,6 +96,35 @@ class NewProjectTests(unittest.TestCase):
 
 
 class CliDefaultsTests(unittest.TestCase):
+    def test_render_batch_size_defaults_and_validation(self) -> None:
+        args = build_parser().parse_args(["VIDEO", "--render"])
+        self.assertIsNone(args.render_batch_size)
+        args = build_parser().parse_args(["VIDEO", "--render", "--render-batch-size", "7"])
+        self.assertEqual(args.render_batch_size, 7)
+        for command in [
+            ["VIDEO", "--render-batch-size", "7", "--dry-run"],
+            ["VIDEO", "--render", "--render-batch-size", "0", "--dry-run"],
+        ]:
+            with self.subTest(command=command), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(command), 1)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(["VIDEO", "--render", "--render-batch-size", "7", "--dry-run"]), 0)
+        self.assertIn("render_batch_size: 7", output.getvalue())
+
+    def test_post_production_batch_size_defaults_and_validation(self) -> None:
+        args = build_parser().parse_args(["PROJECT_ID", "--post-production"])
+        self.assertIsNone(args.post_production_batch_size)
+        args = build_parser().parse_args([
+            "PROJECT_ID", "--post-production", "--post-production-batch-size", "8",
+        ])
+        self.assertEqual(args.post_production_batch_size, 8)
+        for command in [
+            ["VIDEO", "--post-production-batch-size", "8", "--dry-run"],
+            ["VIDEO", "--post-production", "--post-production-batch-size", "0", "--dry-run"],
+        ]:
+            with self.subTest(command=command), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(command), 1)
+
     def test_post_production_requires_project_and_is_exclusive(self) -> None:
         self.assertTrue(build_parser().parse_args(["PROJECT_ID", "--post-production"]).post_production)
         for flag in ["--render", "--storybook"]:
@@ -114,19 +143,23 @@ class CliDefaultsTests(unittest.TestCase):
             root.mkdir()
             metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
             with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()) as output:
-                self.assertEqual(main([metadata["id"], "--post-production", "--dry-run", "--vault", directory]), 0)
+                self.assertEqual(main([metadata["id"], "--post-production", "--post-production-batch-size", "8",
+                                       "--dry-run", "--vault", directory]), 0)
                 pipeline.assert_not_called()
                 self.assertIn("validate-production → post-production → verify-post-production", output.getvalue())
+                self.assertIn("post_production_batch_size: 8", output.getvalue())
                 self.assertNotIn("analyze-source", output.getvalue())
             with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()):
                 result = pipeline.return_value.run.return_value
                 result.passed_review = True
                 result.outputs = []
-                self.assertEqual(main([metadata["id"], "--post-production", "--vault", directory]), 0)
+                self.assertEqual(main([metadata["id"], "--post-production", "--post-production-batch-size", "8",
+                                       "--vault", directory]), 0)
                 spec = pipeline.return_value.run.call_args.args[0]
                 self.assertTrue(spec.post_production)
                 self.assertFalse(spec.render)
                 self.assertEqual(spec.project_id, metadata["id"])
+                self.assertEqual(pipeline.call_args.args[0].post_production_batch_size, 8)
 
     def test_storybook_and_render_are_exclusive(self) -> None:
         self.assertTrue(build_parser().parse_args(["VIDEO", "--storybook"]).storybook)

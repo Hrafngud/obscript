@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from obscript.post_production import PostProductionAgent
 from obscript.production import ProductionError, invalidate_downstream
 from obscript.storage import creative_direction_reference, file_sha256, read_json, read_yaml, write_json, write_yaml
-from test_visual_production import config_fixture, direction_fixture, script_fixture, story_fixture
+from test_visual_production import config_fixture, direction_fixture, scene_fixture, script_fixture, story_fixture
 
 
 class PostProductionTests(unittest.TestCase):
@@ -47,13 +48,16 @@ class PostProductionTests(unittest.TestCase):
                 "actual_duration_seconds": 3, "output_files": ["scene.mp4"],
             })
         self.calls = []
+        self.source_duration = 12
         self.duration = 12
+        self.scene_duration = 3
         self.failure = False
+        self.failure_stage = None
         self.mutate = None
         self.omit_report = False
         self.addCleanup(patch.stopall)
         patch("obscript.post_production.shutil.which", return_value="ffprobe").start()
-        patch("obscript.production.probe_media", return_value=3).start()
+        patch("obscript.production.probe_media", side_effect=lambda path: self.scene_duration).start()
         patch("obscript.post_production.probe_media", side_effect=self.probe).start()
         patch.object(self.agent, "_execute", side_effect=self.execute).start()
 
@@ -67,22 +71,28 @@ class PostProductionTests(unittest.TestCase):
         })
 
     def probe(self, path):
-        return 12 if path.name == "video.mp4" else self.duration
+        return self.source_duration if path.name == "video.mp4" else self.duration
 
     def execute(self, stage, request_path, output_dir):
         self.calls.append(stage)
         request = read_json(request_path)
         self.assertEqual(request["operation"], "post-production")
-        self.assertEqual(request["storybook"], story_fixture())
+        expected = read_yaml(self.root / "storybook.yaml")
+        expected_scenes = {scene["id"]: scene for scene in expected["scenes"]}
+        self.assertEqual(request["storybook"]["scenes"],
+                         [expected_scenes[scene["id"]] for scene in request["storybook"]["scenes"]])
         self.assertEqual(request["audio_policy"], "none")
         self.assertFalse(request["hyperframes"]["render"]["audio"])
         self.assertEqual(Path(request["hyperframes"]["project_directory"]), output_dir / "hyperframes")
         (output_dir / "hyperframes/index.html").write_text("polished editable composition")
         if self.mutate:
             self.mutate.write_text("modified upstream")
-        if self.failure:
+        if self.failure or stage == self.failure_stage:
             raise ProductionError("synthetic executor failure")
-        Path(request["output_video"]).write_bytes(b"polished video")
+        if request["batch"]["render_final"]:
+            Path(request["output_video"]).write_bytes(b"polished video")
+        else:
+            self.assertIsNone(request["output_video"])
         if not self.omit_report:
             Path(request["report"]).write_text("scene-001: improved vignette; checked readable labels.")
 
@@ -99,6 +109,87 @@ class PostProductionTests(unittest.TestCase):
         self.assertEqual(manifest["actual_duration_seconds"], 12)
         self.assertEqual(self.agent.polish(), result)
         self.assertEqual(self.calls, ["post-production"])
+
+    def install_many_scene_fixture(self, count: int, *, batch_size: int = 20):
+        words = [f"palavra{order}" for order in range(1, count + 1)]
+        script = script_fixture()
+        script["metadata"]["target_duration_seconds"] = count
+        script["sections"] = [{
+            "id": "body", "title": "body", "type": "body", "purpose": "Explicar",
+            "topic_refs": [], "estimated_seconds": count, "narration": " ".join(words),
+        }]
+        story = {
+            "schema_version": "2", "target_duration_seconds": count,
+            "scenes": [scene_fixture(order, "body", word) for order, word in enumerate(words, 1)],
+        }
+        for order, scene in enumerate(story["scenes"], 1):
+            scene["voiceover"]["estimated_seconds"] = 1
+            scene["timing"] = {"estimated_start_seconds": order - 1, "estimated_end_seconds": order}
+            scene["transition_out"] = "Corte direto" if order < count else "Nenhuma"
+            scene_dir = self.root / "production/scenes" / scene["id"]
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            (scene_dir / "scene.mp4").write_bytes(b"original scene")
+            write_json(scene_dir / "manifest.json", {
+                "scene_id": scene["id"], "script_section_id": "body",
+                "generator": "hyperframes", "status": "complete",
+                "estimated_duration_seconds": 1, "actual_duration_seconds": 1,
+                "output_files": ["scene.mp4"],
+            })
+        write_json(self.root / ".obscript/approved-script.json", script)
+        write_yaml(self.root / "storybook.yaml", story)
+        write_json(self.root / ".obscript/approved-inputs.json", {
+            "files": {name: file_sha256(self.root / ".obscript" / name)
+                      for name in ["approved-script.json", "review.json", "knowledge.json", "plan.json"]},
+        })
+        self.write_render_receipt()
+        self.agent.config = replace(self.config, post_production_batch_size=batch_size)
+        self.source_duration = count
+        self.duration = count
+        self.scene_duration = 1
+
+    def test_default_batches_75_scenes_as_20_20_20_15(self):
+        self.install_many_scene_fixture(75)
+        result = self.agent.polish()
+        self.assertEqual(result, self.root / "video-polished.mp4")
+        self.assertEqual(self.calls, [
+            "post-production-01-of-04", "post-production-02-of-04",
+            "post-production-03-of-04", "post-production-04-of-04",
+        ])
+        requests = [read_json(path) for path in sorted(
+            (self.root / ".obscript").glob("post-production-*.request.json")
+        )]
+        self.assertEqual([len(request["storybook"]["scenes"]) for request in requests], [20, 20, 20, 15])
+        self.assertEqual([request["batch"]["render_final"] for request in requests],
+                         [False, False, False, True])
+        manifest = read_yaml(self.root / "post-production.yaml")
+        self.assertEqual(manifest["post_production_batch_size"], 20)
+        self.assertTrue(all(item["status"] == "complete" for item in manifest["batches"]))
+        self.assertEqual((self.root / "post-production/report.md").read_text().count("## Batch"), 4)
+
+    def test_custom_batch_size_keeps_short_remainder(self):
+        self.install_many_scene_fixture(5, batch_size=2)
+        self.agent.polish()
+        requests = [read_json(path) for path in sorted(
+            (self.root / ".obscript").glob("post-production-*.request.json")
+        )]
+        self.assertEqual([len(request["storybook"]["scenes"]) for request in requests], [2, 2, 1])
+        self.assertTrue(requests[-1]["batch"]["render_final"])
+
+    def test_retry_skips_completed_batches_and_processes_the_remainder(self):
+        self.install_many_scene_fixture(5, batch_size=2)
+        self.failure_stage = "post-production-02-of-03"
+        with self.assertRaisesRegex(ProductionError, "synthetic executor failure"):
+            self.agent.polish()
+        self.assertEqual(self.calls, ["post-production-01-of-03", "post-production-02-of-03"])
+        manifest = read_yaml(self.root / "post-production.yaml")
+        self.assertEqual([item["status"] for item in manifest["batches"]],
+                         ["complete", "failed", "pending"])
+        self.failure_stage = None
+        self.agent.polish()
+        self.assertEqual(self.calls, [
+            "post-production-01-of-03", "post-production-02-of-03",
+            "post-production-02-of-03", "post-production-03-of-03",
+        ])
 
     def test_stale_render_inputs_block_executor(self):
         for path in [self.root / "storybook.yaml", self.direction, self.root / "video.mp4",
