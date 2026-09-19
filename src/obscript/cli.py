@@ -40,6 +40,7 @@ examples:
   obscript VIDEO --render --opencode
   obscript PROJECT_ID --render --opencode
   obscript PROJECT_ID --post-production
+  obscript PROJECT_ID --post-production "Resize Linux logo in scene 25 for a bigger scale."
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
 is mandatory and has no translate modifier.
@@ -139,8 +140,9 @@ is mandatory and has no translate modifier.
         help="render silent animations through the installed HyperFrames skill",
     )
     phase.add_argument(
-        "--post-production", action="store_true",
-        help="polish an existing project's completed render with effects and varied transitions",
+        "--post-production", nargs="?", const=True, default=False, metavar="INSTRUCTION",
+        help=("polish an existing project's completed render with effects and varied transitions; "
+              "optionally include a custom instruction"),
     )
     parser.add_argument(
         "--render-batch-size",
@@ -209,13 +211,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        post_production_instruction = None
+        if isinstance(args.post_production, str):
+            post_production_instruction = args.post_production.strip()
+            if not post_production_instruction:
+                raise ContractError("--post-production instruction must not be empty")
+        post_production_requested = args.post_production is not False
         if args.opencode_bin and not args.opencode:
             raise ContractError("--opencode-bin requires --opencode")
         if args.render_batch_size is not None and not args.render:
             raise ContractError("--render-batch-size requires --render")
         if args.render_batch_size is not None and args.render_batch_size < 1:
             raise ContractError("--render-batch-size must be at least 1")
-        if args.post_production_batch_size is not None and not args.post_production:
+        if args.post_production_batch_size is not None and not post_production_requested:
             raise ContractError("--post-production-batch-size requires --post-production")
         if args.post_production_batch_size is not None and args.post_production_batch_size < 1:
             raise ContractError("--post-production-batch-size must be at least 1")
@@ -228,11 +236,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.project or args.target_duration or args.into is not None:
                 raise ContractError("Resuming a project retains its name, duration, and split settings; omit --project, --target-duration, and --into")
             spec = resume_spec(project_root, storybook=args.storybook, render=args.render,
-                               post_production=args.post_production)
+                               post_production=post_production_requested)
             if args.creative_direction is None:
                 args.creative_direction = Path(read_json(project_root / "project.json")["creative_direction"])
         else:
-            if args.post_production:
+            if post_production_requested:
                 raise ContractError("--post-production requires an existing project ID; render the project with --render first")
             spec = parse_command_tokens(
                 args.command,
@@ -249,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"render_batch_size: {args.render_batch_size or 20}")
             if spec.post_production:
                 print(f"post_production_batch_size: {args.post_production_batch_size or 20}")
+                if post_production_instruction:
+                    print(f"post_production_instruction: {post_production_instruction}")
             print(f"agent: {'OpenCode CLI' if args.opencode else 'Codex CLI'}")
             return 0
 
@@ -282,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             opencode=opencode,
             render_batch_size=args.render_batch_size or 20,
             post_production_batch_size=args.post_production_batch_size or 20,
+            post_production_instruction=post_production_instruction,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:

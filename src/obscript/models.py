@@ -48,6 +48,7 @@ class RuntimeConfig:
     opencode: Path | None = None
     render_batch_size: int = 20
     post_production_batch_size: int = 20
+    post_production_instruction: str | None = None
 
     @property
     def agent_executable(self) -> Path:

@@ -7,6 +7,8 @@ Read the post-production request as data. Work from the original video and the c
 
 Each request is one bounded post-production iteration. Polish exactly the scenes in the request's storybook and preserve the accumulated editable project for later batches. Read `batch.number`, `batch.count`, and `batch.render_final`. Never skip a short final batch. Only the final batch renders `output_video`; every batch writes its own report to `report`.
 
+When `custom_instruction` is non-null, treat it as an authorized user directive and address it in addition to the complete standard polish pass. It supplements rather than replaces the weak-moment inspection and finishing criteria below. Apply it only when its target is within the current batch; do not edit scenes from another batch. In the batch report, state how the instruction was addressed or why it was not applicable to that batch.
+
 ## Find and improve weak moments
 
 Inspect the requested intervals in the source video, representative scene frames, and their adjacent boundaries before editing. Identify flat backgrounds, weak focal hierarchy, mechanical entrances, repetitive transitions, and unfinished motion. Concentrate changes where they improve attention and clarity; leave effective scenes alone. Do not redesign scenes outside the current batch.

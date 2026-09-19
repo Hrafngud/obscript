@@ -48,6 +48,7 @@ class PostProductionTests(unittest.TestCase):
                 "actual_duration_seconds": 3, "output_files": ["scene.mp4"],
             })
         self.calls = []
+        self.requests = []
         self.source_duration = 12
         self.duration = 12
         self.scene_duration = 3
@@ -76,6 +77,7 @@ class PostProductionTests(unittest.TestCase):
     def execute(self, stage, request_path, output_dir):
         self.calls.append(stage)
         request = read_json(request_path)
+        self.requests.append(request)
         self.assertEqual(request["operation"], "post-production")
         expected = read_yaml(self.root / "storybook.yaml")
         expected_scenes = {scene["id"]: scene for scene in expected["scenes"]}
@@ -174,6 +176,25 @@ class PostProductionTests(unittest.TestCase):
         )]
         self.assertEqual([len(request["storybook"]["scenes"]) for request in requests], [2, 2, 1])
         self.assertTrue(requests[-1]["batch"]["render_final"])
+
+    def test_custom_instruction_supplements_pass_and_invalidates_other_completion(self):
+        instruction = "Resize Linux logo in scene 25 for a bigger scale."
+        self.agent.config = replace(self.config, post_production_instruction=instruction)
+        self.agent.polish()
+        self.assertEqual(self.requests[-1]["custom_instruction"], instruction)
+        self.assertIn("in addition to the complete standard polish pass",
+                      self.requests[-1]["instruction_policy"])
+        self.assertEqual(read_yaml(self.root / "post-production.yaml")["custom_instruction"], instruction)
+        self.assertEqual(read_json(self.root / ".obscript/post-production-inputs.json")["custom_instruction"],
+                         instruction)
+
+        self.agent.polish()
+        self.assertEqual(len(self.calls), 1)
+        revised = "Increase the title contrast in scene 1."
+        self.agent.config = replace(self.config, post_production_instruction=revised)
+        self.agent.polish()
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.requests[-1]["custom_instruction"], revised)
 
     def test_retry_skips_completed_batches_and_processes_the_remainder(self):
         self.install_many_scene_fixture(5, batch_size=2)

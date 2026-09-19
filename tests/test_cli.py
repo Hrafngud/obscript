@@ -113,6 +113,7 @@ class CliDefaultsTests(unittest.TestCase):
 
     def test_post_production_batch_size_defaults_and_validation(self) -> None:
         args = build_parser().parse_args(["PROJECT_ID", "--post-production"])
+        self.assertIs(args.post_production, True)
         self.assertIsNone(args.post_production_batch_size)
         args = build_parser().parse_args([
             "PROJECT_ID", "--post-production", "--post-production-batch-size", "8",
@@ -124,6 +125,29 @@ class CliDefaultsTests(unittest.TestCase):
         ]:
             with self.subTest(command=command), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(command), 1)
+
+    def test_post_production_accepts_custom_instruction(self) -> None:
+        instruction = "Resize Linux logo in scene 25 for a bigger scale."
+        args = build_parser().parse_args(["PROJECT_ID", "--post-production", instruction])
+        self.assertEqual(args.post_production, instruction)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()):
+                result = pipeline.return_value.run.return_value
+                result.passed_review = True
+                result.outputs = []
+                self.assertEqual(main([
+                    metadata["id"], "--post-production", instruction, "--vault", directory,
+                ]), 0)
+            config = pipeline.call_args.args[0]
+            self.assertEqual(config.post_production_instruction, instruction)
+            self.assertTrue(pipeline.return_value.run.call_args.args[0].post_production)
+
+        with contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(main(["PROJECT_ID", "--post-production", "   ", "--dry-run"]), 1)
+        self.assertIn("instruction must not be empty", error.getvalue())
 
     def test_post_production_requires_project_and_is_exclusive(self) -> None:
         self.assertTrue(build_parser().parse_args(["PROJECT_ID", "--post-production"]).post_production)
