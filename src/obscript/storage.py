@@ -186,7 +186,7 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
         # The caller supplies a path relative to the document for Obsidian links.
         direction_link = f" · [Shared creative direction](<{direction_path.as_posix()}>)"
     lines.extend([
-        f"[Script with timestamps](script.md){direction_link}", "",
+        f"[Readable script](script-readable.md) · [Script with timestamps](script.md){direction_link}", "",
         "Scene directions are in English; narration and on-screen labels retain their original language.", "",
         "[Structured production plan](storybook.yaml) contains the exact narration references and all scene fields.", "",
         "## Timeline", "",

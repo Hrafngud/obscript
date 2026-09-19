@@ -92,7 +92,7 @@ def invalidate_downstream(unit_dir: Path, changed: str) -> None:
         paths.extend(["storybook.md", "storybook.yaml", ".obscript/storybook.json"])
     if changed == "script":
         paths.append(".obscript/approved-inputs.json")
-        paths.extend(["creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])
+        paths.extend(["script-readable.md", "creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])
     existing = [unit_dir / name for name in paths if (unit_dir / name).exists()]
     if not existing:
         return
@@ -250,7 +250,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         inputs = {path: path.read_bytes() for path in [script_path, direction_path, storybook_path, review_path]}
         if reference_path.exists():
             inputs[reference_path] = reference_path.read_bytes()
-        for name in ["script.md", "plan.md", "knowledge.yaml", "review.yaml", "creative-direction.md", "storybook.md", "storybook.yaml"]:
+        for name in ["script.md", "script-readable.md", "plan.md", "knowledge.yaml", "review.yaml", "creative-direction.md", "storybook.md", "storybook.yaml"]:
             path = self.project_root / name
             if path.exists():
                 inputs[path] = path.read_bytes()

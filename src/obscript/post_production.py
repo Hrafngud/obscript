@@ -110,7 +110,7 @@ Do not claim success until local artifacts exist. Report blockers clearly.
         protected.update(path for path in (root / "production").rglob("*") if path.is_file())
         protected.update(path for path in (root / ".obscript").glob("*.json")
                          if not path.name.startswith("post-production"))
-        protected.update(root / name for name in ["script.md", "plan.md", "knowledge.yaml", "review.yaml", "storybook.md"]
+        protected.update(root / name for name in ["script.md", "script-readable.md", "plan.md", "knowledge.yaml", "review.yaml", "storybook.md"]
                          if (root / name).is_file())
         fingerprints = {str(path): file_sha256(path) for path in sorted(protected)}
         if receipt_path.exists() and manifest_path.exists() and final_video.is_file() and report.is_file():

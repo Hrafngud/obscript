@@ -306,6 +306,18 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertEqual(self.producer.return_value.produce.call_count, 2)
         self.ingest.assert_called_once()
 
+    def test_resume_existing_storybook_backfills_readable_script(self):
+        result = self.run_pipeline()
+        readable = result.project_root / "script-readable.md"
+        readable.unlink()
+        FakePlanningAgent.calls.clear()
+
+        resumed = self.resume(result.project_root, storybook=True)
+
+        self.assertFalse(FakePlanningAgent.calls)
+        self.assertEqual(readable.read_text(), render_script(script_fixture()))
+        self.assertIn(readable, resumed.outputs)
+
     def test_invalid_manual_storybook_is_preserved_and_blocks_render(self):
         result = self.run_pipeline()
         story = story_fixture()
@@ -414,7 +426,8 @@ class PipelineVisualTests(unittest.TestCase):
     def test_storybook_preproduction_without_media_calls(self):
         result = self.run_pipeline()
         self.assertTrue(result.passed_review)
-        self.assertEqual([path.name for path in result.outputs], ["script.md", "storybook.md", "storybook.yaml"])
+        self.assertEqual([path.name for path in result.outputs],
+                         ["script.md", "script-readable.md", "storybook.md", "storybook.yaml"])
         self.assertNotIn("creative-direction", [stage for stage, _ in FakePlanningAgent.calls])
         self.assertFalse((result.project_root / "creative-direction.md").exists())
         self.assertFalse((result.project_root / ".obscript/creative-direction.json").exists())
@@ -429,6 +442,9 @@ class PipelineVisualTests(unittest.TestCase):
         script_text = (result.project_root / "script.md").read_text()
         self.assertIn("hook · 00:00:00.000 → 00:00:06.000", script_text)
         self.assertIn("scene-004 · 00:00:09.000 → 00:00:12.000", script_text)
+        readable_text = (result.project_root / "script-readable.md").read_text()
+        self.assertEqual(readable_text, render_script(script_fixture()))
+        self.assertNotIn("00:00:", readable_text)
 
     def test_missing_or_empty_shared_direction_fails_before_source_import(self):
         for content in [None, "  \n"]:
@@ -513,7 +529,7 @@ class PipelineVisualTests(unittest.TestCase):
                 result = self.run_pipeline(tokens)
                 for number in [1, 2]:
                     unit = result.project_root / f"video-{number:02d}"
-                    for name in ["knowledge.yaml", "plan.md", "script.md", "review.yaml", "storybook.md", "storybook.yaml",
+                    for name in ["knowledge.yaml", "plan.md", "script.md", "script-readable.md", "review.yaml", "storybook.md", "storybook.yaml",
                                  ".obscript/approved-script.json", ".obscript/creative-direction-source.json", ".obscript/storybook.json"]:
                         self.assertTrue((unit / name).exists(), name)
                     self.assertFalse((unit / "creative-direction.md").exists())
@@ -889,6 +905,7 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         text = render_storybook(story, script)
         self.assertIn("status: validated", text)
         self.assertIn("language: en", text)
+        self.assertIn("[Readable script](script-readable.md)", text)
         self.assertIn("[Script with timestamps](script.md)", text)
         self.assertIn("[Structured production plan](storybook.yaml)", text)
         self.assertIn("**Section:** hook · hook", text)
@@ -939,11 +956,11 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         for changed, removed in [
             ("storybook", ["production.yaml", "video.mp4"]),
             ("creative-direction", ["production.yaml", "video.mp4", "storybook.yaml"]),
-            ("script", ["production.yaml", "video.mp4", "storybook.yaml", "creative-direction.md"]),
+            ("script", ["production.yaml", "video.mp4", "storybook.yaml", "script-readable.md", "creative-direction.md"]),
         ]:
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
-                for name in ["script.md", "creative-direction.md", "storybook.md", "storybook.yaml", "production.yaml", "video.mp4"]:
+                for name in ["script.md", "script-readable.md", "creative-direction.md", "storybook.md", "storybook.yaml", "production.yaml", "video.mp4"]:
                     (root / name).write_text("old artifact")
                 invalidate_downstream(root, changed)
                 self.assertTrue((root / "script.md").exists())

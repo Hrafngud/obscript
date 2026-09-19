@@ -248,7 +248,11 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                     raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
                 storybook, storybook_path = self._get_storybook(unit_agent, unit_dir, approved, direction_path, render=spec.render)
                 update_project(project_root, phase="storybook", unit=unit_dir)
-                outputs.extend([unit_dir / "storybook.md", unit_dir / "storybook.yaml"])
+                outputs.extend([
+                    unit_dir / "script-readable.md",
+                    unit_dir / "storybook.md",
+                    unit_dir / "storybook.yaml",
+                ])
                 if spec.render:
                     outputs.append(self._produce_video(unit_dir, approved, direction_path, storybook_path))
                     outputs.append(unit_dir / "production.yaml")
@@ -564,6 +568,9 @@ Return findings only; do not rewrite the script.""",
                 raise ContractError("Shared creative direction changed after storybook planning; run PROJECT_ID --storybook before rendering")
             storybook = read_yaml(path)
             self._validate_storybook(approved, storybook)
+            readable_script = unit_dir / "script-readable.md"
+            if not readable_script.exists():
+                readable_script.write_text(render_script(approved.script), encoding="utf-8")
             previous_path = unit_dir / ".obscript/storybook.json"
             if previous_path.exists():
                 previous = read_json(previous_path)
@@ -630,6 +637,7 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
             write_json(path, storybook)
             write_yaml(unit_dir / "storybook.yaml", storybook)
             (unit_dir / "storybook.md").write_text(render_storybook(storybook, approved.script, direction_path=direction_link), encoding="utf-8")
+            (unit_dir / "script-readable.md").write_text(render_script(approved.script), encoding="utf-8")
             (unit_dir / "script.md").write_text(render_script(approved.script, storybook), encoding="utf-8")
             return storybook, unit_dir / "storybook.yaml"
         raise AssertionError("unreachable")
