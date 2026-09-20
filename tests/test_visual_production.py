@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +20,8 @@ from obscript.production import ProductionAgent, ProductionError, invalidate_dow
 from obscript.storage import creative_direction_reference, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
 
 REPO = Path(__file__).resolve().parents[1]
+FOREGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/api.svg"
+BACKGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png"
 
 
 def script_fixture() -> dict:
@@ -43,17 +46,58 @@ def scene_fixture(order: int, section_id: str, text: str) -> dict:
         "voiceover": {"text": text, "estimated_seconds": 3},
         "timing": {"estimated_start_seconds": (order - 1) * 3, "estimated_end_seconds": order * 3},
         "narrative_beat": "Explicar a relação", "visual_goal": "Entender o padrão",
+        "design_pillars": {
+            "context": {
+                "narration_claim": "The observed pattern has an identifiable cause.",
+                "visible_evidence": "A request visibly changes after crossing the causal node.",
+                "accuracy_guardrail": "Do not imply that sequence alone proves causation.",
+            },
+            "assets": {
+                "search_queries": ["api request node", "dark texture background"],
+                "candidates_considered": [FOREGROUND_ASSET, BACKGROUND_ASSET],
+                "selected_assets": [
+                    {"path": FOREGROUND_ASSET, "usage": "foreground", "semantic_role": "The acting request interface."},
+                    {"path": BACKGROUND_ASSET, "usage": "background", "semantic_role": "The full-frame visual ground."},
+                ],
+                "exception_reason": "",
+            },
+            "animation": {
+                "explanatory_change": "The request crosses the node and changes state.",
+                "attention_path": "Follow the request into the node and then to its changed output.",
+            },
+            "visual_abstraction": {
+                "primitive": "Directed request token through a causal node",
+                "semantic_mapping": "The token is the request; the node is the cause; its changed state is the observed result.",
+            },
+            "directness": {
+                "attention_anchor": "One request token visibly transformed by the central node.",
+                "mute_read": "The viewer sees that crossing the node changes the request.",
+            },
+        },
         "composition": {"layout": "Centro", "focal_element": "Nó", "supporting_elements": []},
-        "visual_elements": [{"type": "diagrama", "content": "Nó conectado", "role": "Relação"}],
+        "visual_elements": [
+            {"type": "foreground asset", "content": FOREGROUND_ASSET, "role": "Acting request interface"},
+            {"type": "raster background", "content": BACKGROUND_ASSET, "role": "Full-frame visual ground"},
+        ],
         "onscreen_text": [{"text": "Observe a causa", "purpose": "Ênfase"}],
-        "animation": {key: "Nenhuma" for key in ["entrance", "continuous", "emphasis", "exit", "camera"]},
-        "transition_out": "Corte direto" if order < 4 else "Nenhuma", "asset_requirements": [],
-        "render_brief": "Mostre o nó no centro.",
+        "animation": {
+            "entrance": "Reveal the request token at left.",
+            "continuous": "Move the request through the causal node and change its state.",
+            "emphasis": "Pulse the changed output once.",
+            "exit": "Hold the changed output for the cut.",
+            "camera": "Track the token from left to right.",
+        },
+        "transition_out": "Corte direto" if order < 4 else "Nenhuma",
+        "asset_requirements": [
+            {"type": "foreground asset", "description": FOREGROUND_ASSET},
+            {"type": "raster background", "description": BACKGROUND_ASSET},
+        ],
+        "render_brief": f"Use {BACKGROUND_ASSET} full-frame. Animate a request through {FOREGROUND_ASSET} and visibly change its state.",
     }
 
 
 def story_fixture() -> dict:
-    return {"schema_version": "2", "target_duration_seconds": 12, "scenes": [
+    return {"schema_version": "3", "target_duration_seconds": 12, "scenes": [
         scene_fixture(1, "hook", "Você observa o padrão."),
         scene_fixture(2, "hook", "Agora veja a causa."),
         scene_fixture(3, "body", "A causa explica o padrão."),
@@ -79,6 +123,34 @@ def load_yaml(path: Path) -> dict:
 
 
 class StorybookValidationTests(unittest.TestCase):
+    def test_documented_good_scene_example_is_schema_and_contract_valid(self):
+        reference = (REPO / "skills/storybook/references/good-scene-example.md").read_text()
+        scene = json.loads(reference.split("```json\n", 1)[1].split("\n```", 1)[0])
+        duration = scene["voiceover"]["estimated_seconds"]
+        script = {
+            "schema_version": "1",
+            "language": "pt-BR",
+            "title": "Cache",
+            "thesis": "Cache evita trabalho repetido.",
+            "metadata": {
+                "format": "source",
+                "pipeline": "single",
+                "time_controller": "normal",
+                "target_duration_seconds": duration,
+            },
+            "sections": [{
+                "id": scene["script_section_id"],
+                "title": "Mecanismo",
+                "type": "body",
+                "purpose": "Mostrar o mecanismo",
+                "topic_refs": [],
+                "estimated_seconds": duration,
+                "narration": scene["voiceover"]["text"],
+            }],
+        }
+        storybook = {"schema_version": "3", "target_duration_seconds": duration, "scenes": [scene]}
+        validate_storybook(script, storybook, duration)
+
     def test_exact_coverage_with_whitespace_normalization(self):
         story = story_fixture()
         story["scenes"][0]["voiceover"]["text"] = "Você  observa\no padrão."
@@ -91,6 +163,66 @@ class StorybookValidationTests(unittest.TestCase):
                 story = story_fixture()
                 story["scenes"][0]["onscreen_text"][0]["text"] = text
                 validate_storybook(script_fixture(), story, 12)
+
+    def test_requires_complete_five_pillar_scene_contract(self):
+        story = story_fixture()
+        del story["scenes"][0]["design_pillars"]["directness"]
+        with self.assertRaisesRegex(ContractError, "directness"):
+            validate_storybook(script_fixture(), story, 12)
+
+    def test_rejects_entrance_only_animation(self):
+        story = story_fixture()
+        for key in ["continuous", "emphasis", "camera"]:
+            story["scenes"][0]["animation"][key] = "None"
+        with self.assertRaisesRegex(ContractError, "explanatory motion"):
+            validate_storybook(script_fixture(), story, 12)
+
+    def test_rejects_untraceable_asset_selection(self):
+        story = story_fixture()
+        story["scenes"][0]["design_pillars"]["assets"]["candidates_considered"].remove(FOREGROUND_ASSET)
+        with self.assertRaisesRegex(ContractError, "not recorded among search candidates"):
+            validate_storybook(script_fixture(), story, 12)
+
+    def test_rejects_nonexistent_selected_library_asset(self):
+        story = story_fixture()
+        scene = story["scenes"][0]
+        missing = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/does-not-exist.svg"
+        assets = scene["design_pillars"]["assets"]
+        assets["candidates_considered"] = [missing if path == FOREGROUND_ASSET else path
+                                             for path in assets["candidates_considered"]]
+        assets["selected_assets"][0]["path"] = missing
+        scene["visual_elements"][0]["content"] = missing
+        scene["asset_requirements"][0]["description"] = missing
+        scene["render_brief"] = scene["render_brief"].replace(FOREGROUND_ASSET, missing)
+        with self.assertRaisesRegex(ContractError, "does not exist"):
+            validate_storybook(script_fixture(), story, 12)
+
+    def test_requires_contextual_foreground_assets_in_four_of_five_scenes(self):
+        story = story_fixture()
+        scene = story["scenes"][0]
+        scene["design_pillars"]["assets"]["selected_assets"] = [
+            asset for asset in scene["design_pillars"]["assets"]["selected_assets"]
+            if asset["usage"] == "background"
+        ]
+        scene["design_pillars"]["assets"]["exception_reason"] = "No searched foreground asset clarified this abstract beat."
+        scene["visual_elements"] = [item for item in scene["visual_elements"] if FOREGROUND_ASSET not in item["content"]]
+        scene["asset_requirements"] = [item for item in scene["asset_requirements"] if FOREGROUND_ASSET not in item["description"]]
+        scene["render_brief"] = f"Use {BACKGROUND_ASSET} full-frame and animate the causal state change directly."
+        with self.assertRaisesRegex(ContractError, "contextual foreground assets"):
+            validate_storybook(script_fixture(), story, 12)
+
+    def test_requires_verified_raster_background_coverage(self):
+        story = story_fixture()
+        for scene in story["scenes"]:
+            scene["design_pillars"]["assets"]["selected_assets"] = [
+                asset for asset in scene["design_pillars"]["assets"]["selected_assets"]
+                if asset["usage"] == "foreground"
+            ]
+            scene["visual_elements"] = [item for item in scene["visual_elements"] if BACKGROUND_ASSET not in item["content"]]
+            scene["asset_requirements"] = [item for item in scene["asset_requirements"] if BACKGROUND_ASSET not in item["description"]]
+            scene["render_brief"] = f"Animate a request through {FOREGROUND_ASSET} and visibly change its state."
+        with self.assertRaisesRegex(ContractError, "verified raster backgrounds"):
+            validate_storybook(script_fixture(), story, 12)
 
     def test_rejects_narration_defects(self):
         changes = {
@@ -267,6 +399,14 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertIn("Tiny accents do not count", prompt)
         self.assertIn("Never generate, request, or use SVG backgrounds", prompt)
 
+    def test_storybook_prompt_requires_all_five_pillars_and_asset_search(self):
+        self.run_pipeline()
+        prompt = next(prompt for stage, prompt in FakePlanningAgent.prompts if stage == "storybook-01")
+        self.assertIn("all five non-negotiable design pillars together", prompt)
+        self.assertIn("perform a text search of the local asset library", prompt)
+        self.assertIn("ceil(4 * total scene count / 5)", prompt)
+        self.assertIn("entrances and exits alone never satisfy", prompt)
+
     def test_switch_to_opencode_reuses_approved_codex_script(self):
         result = self.run_pipeline(storybook=False)
         spec = resume_spec(result.project_root, storybook=False, render=True)
@@ -301,7 +441,7 @@ class PipelineVisualTests(unittest.TestCase):
     def test_resume_manual_storybook_then_skip_completed_render(self):
         result = self.run_pipeline()
         story = story_fixture()
-        story["scenes"][0]["render_brief"] = "Manual visual revision"
+        story["scenes"][0]["render_brief"] = f"Manual visual revision using {FOREGROUND_ASSET} over {BACKGROUND_ASSET}."
         write_yaml(result.project_root / "storybook.yaml", story)
         (result.project_root / "storybook.md").write_text("My manual notes")
         FakePlanningAgent.calls.clear()
@@ -311,7 +451,7 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertEqual((result.project_root / "storybook.md").read_text(), "My manual notes")
         self.resume(result.project_root, render=True)
         self.producer.return_value.produce.assert_called_once()
-        story["scenes"][0]["render_brief"] = "Second manual revision"
+        story["scenes"][0]["render_brief"] = f"Second manual revision using {FOREGROUND_ASSET} over {BACKGROUND_ASSET}."
         write_yaml(result.project_root / "storybook.yaml", story)
         self.resume(result.project_root, render=True)
         self.assertEqual(self.producer.return_value.produce.call_count, 2)
@@ -328,6 +468,21 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertFalse(FakePlanningAgent.calls)
         self.assertEqual(readable.read_text(), render_script(script_fixture()))
         self.assertIn(readable, resumed.outputs)
+
+    def test_explicit_storybook_rebuilds_obsolete_contract_but_render_blocks_it(self):
+        result = self.run_pipeline()
+        storybook_path = result.project_root / "storybook.yaml"
+        obsolete = load_yaml(storybook_path)
+        obsolete["schema_version"] = "2"
+        write_yaml(storybook_path, obsolete)
+
+        with self.assertRaisesRegex(ContractError, "obsolete scene contract"):
+            self.resume(result.project_root, render=True)
+
+        FakePlanningAgent.calls.clear()
+        self.resume(result.project_root, storybook=True)
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual(load_yaml(storybook_path)["schema_version"], "3")
 
     def test_invalid_manual_storybook_is_preserved_and_blocks_render(self):
         result = self.run_pipeline()
@@ -705,7 +860,7 @@ class ProductionExecutionTests(unittest.TestCase):
             "topic_refs": [], "estimated_seconds": count, "narration": " ".join(words),
         }]
         story = {
-            "schema_version": "2", "target_duration_seconds": count,
+            "schema_version": "3", "target_duration_seconds": count,
             "scenes": [scene_fixture(order, "body", word) for order, word in enumerate(words, 1)],
         }
         for order, scene in enumerate(story["scenes"], 1):
@@ -774,7 +929,7 @@ class ProductionExecutionTests(unittest.TestCase):
         with self.assertRaises(ProductionError):
             self.patched_produce()
         story = story_fixture()
-        story["scenes"][0]["render_brief"] = "Changed plan"
+        story["scenes"][0]["render_brief"] = f"Changed plan using {FOREGROUND_ASSET} over {BACKGROUND_ASSET}."
         write_json(self.paths["storybook"], story)
         def changed_executor(stage, request_path, output_dir):
             request = read_json(request_path)

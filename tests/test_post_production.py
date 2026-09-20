@@ -9,7 +9,15 @@ from unittest.mock import patch
 from obscript.post_production import PostProductionAgent
 from obscript.production import ProductionError, invalidate_downstream
 from obscript.storage import creative_direction_reference, file_sha256, read_json, read_yaml, write_json, write_yaml
-from test_visual_production import config_fixture, direction_fixture, scene_fixture, script_fixture, story_fixture
+from test_visual_production import (
+    BACKGROUND_ASSET,
+    FOREGROUND_ASSET,
+    config_fixture,
+    direction_fixture,
+    scene_fixture,
+    script_fixture,
+    story_fixture,
+)
 
 
 class PostProductionTests(unittest.TestCase):
@@ -121,7 +129,7 @@ class PostProductionTests(unittest.TestCase):
             "topic_refs": [], "estimated_seconds": count, "narration": " ".join(words),
         }]
         story = {
-            "schema_version": "2", "target_duration_seconds": count,
+            "schema_version": "3", "target_duration_seconds": count,
             "scenes": [scene_fixture(order, "body", word) for order, word in enumerate(words, 1)],
         }
         for order, scene in enumerate(story["scenes"], 1):
@@ -219,7 +227,7 @@ class PostProductionTests(unittest.TestCase):
                 original = path.read_bytes()
                 if path.name == "storybook.yaml":
                     story = story_fixture()
-                    story["scenes"][0]["render_brief"] = "new plan"
+                    story["scenes"][0]["render_brief"] = f"New plan using {FOREGROUND_ASSET} over {BACKGROUND_ASSET}."
                     write_yaml(path, story)
                 elif path.name == "approved-script.json":
                     script = script_fixture()

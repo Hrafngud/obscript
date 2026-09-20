@@ -13,7 +13,7 @@ from .opencode_agent import OpenCodeAgent
 from .contracts import ContractError, choose_target_duration, script_duration_bounds
 from .models import CommandSpec, RuntimeConfig
 from .projects import create_project, find_project, update_project
-from .production import ProductionAgent, invalidate_downstream, validate_storybook
+from .production import STORYBOOK_SCHEMA_VERSION, ProductionAgent, invalidate_downstream, validate_storybook
 from .post_production import PostProductionAgent
 from .storage import (
     copy_if_present,
@@ -561,6 +561,14 @@ Return findings only; do not rewrite the script.""",
         path = unit_dir / "storybook.yaml"
         reference = unit_dir / ".obscript/creative-direction-source.json"
         if path.exists():
+            storybook = read_yaml(path)
+            if storybook.get("schema_version") != STORYBOOK_SCHEMA_VERSION:
+                if not render:
+                    invalidate_downstream(unit_dir, "storybook")
+                    return self._create_storybook(agent, unit_dir, approved, direction_path)
+                raise ContractError(
+                    "Storybook uses an obsolete scene contract; run PROJECT_ID --storybook before rendering"
+                )
             expected = creative_direction_reference(direction_path, read_creative_direction(direction_path))
             if not reference.exists() or read_json(reference) != expected:
                 # An explicit storybook request can rebuild plans after standards change.
@@ -569,7 +577,6 @@ Return findings only; do not rewrite the script.""",
                     invalidate_downstream(unit_dir, "creative-direction")
                     return self._create_storybook(agent, unit_dir, approved, direction_path)
                 raise ContractError("Shared creative direction changed after storybook planning; run PROJECT_ID --storybook before rendering")
-            storybook = read_yaml(path)
             self._validate_storybook(approved, storybook)
             readable_script = unit_dir / "script-readable.md"
             if not readable_script.exists():
@@ -616,12 +623,14 @@ No scene may span sections. Timing starts at zero, is continuous, and ends at th
 Production is silent animations only. Narration excerpts are timing references for a human reader.
 Write scene and production directions in English; preserve narration verbatim and keep on-screen labels in the script's language unless shared direction specifies otherwise.
 Describe visible elements, positions, asset references, backgrounds, and timed motion, without re-explaining the narration.
+Resolve all five non-negotiable design pillars together in every scene and record them in design_pillars: context accuracy, scene-specific asset search, explanatory animation, a semantic visual abstraction from the visual-language map, and one mute-readable attention anchor. A scene is incomplete if any pillar is missing or merely promised for production.
+For every scene, perform a text search of the local asset library using terms derived from that scene's concrete subject, action, setting, and named technology. Record the actual queries and verified candidate paths. Use at least one context-relevant foreground library asset in at least ceil(4 * total scene count / 5) scenes; the few exceptions require a concrete reason after an unsuccessful search. Backgrounds do not satisfy foreground coverage.
 Build each scene around one evolving visual explanation: a focused real technical action, schematic, infographic, environment, transformation, or accurate visual analogy. Show mechanisms and cause-and-effect instead of printing definitions or narration in containers.
 For technical ideas, use semantically accurate visual primitives such as directed arrows, traveling data tokens, pulses, trees, node graphs, pipelines, queues, layers, state machines, timelines, and charts; preserve their meaning across scenes and never use them as decorative motion.
 Default to one dominant subject and a guided focal path. Use cards, boxes, grids, panels, and side-by-side layouts only when grouping, containment, interface structure, or direct comparison is the concept. Illustrations must act, reveal a relationship, establish a necessary context, or carry a transition; never use them as filler.
-Vary composition and explanatory mode across adjacent scenes. Use motion to transform state, route attention, or demonstrate behavior, not only to make static elements enter.
+Vary composition and explanatory mode across adjacent scenes. Every scene must use motion to transform state, route attention, or demonstrate behavior; entrances and exits alone never satisfy the animation pillar.
 Make each render_brief a concise, self-contained imperative paragraph covering the complete scene and its transition.
-Use supplied asset paths exactly; identify assets needing sourcing or creation instead of inventing existing files.
+Use supplied and search-verified asset paths exactly across design_pillars, visual_elements, asset_requirements, and render_brief; identify assets needing sourcing or creation instead of inventing existing files.
 Use a verified raster image from the local assets/background1 collection as a visible full-frame or substantial background region in at least ceil(total scene count / 5) scenes, with a minimum of one. Distribute those scenes through the video. Tiny accents do not count.
 Never generate, request, or use SVG backgrounds; SVG assets are allowed only as foreground icons or illustrations.
 Do not request audio, TTS, music, sound effects, or automatic subtitles. Scene timestamps govern rendering.

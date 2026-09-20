@@ -11,6 +11,8 @@ Read `batch.number`, `batch.count`, and `batch.assemble_final`. When `assemble_f
 
 creative_direction is the verbatim shared Markdown, and creative_direction_source identifies its authoritative file. Follow its filled standards across every scene. Blank fields and field suggestions are unspecified; use the storybook's scene decisions for execution. Do not generate a new visual identity or create or edit a creative-direction file. Copies in the production request and HyperFrames brief are handoff context, not new standards to maintain.
 
+Every scene's `design_pillars` is a binding execution contract, not planning commentary. Preserve the context claim and accuracy guardrail; use each selected asset for its stated semantic role; implement the explanatory change and attention path; keep the abstraction's visual mapping stable; and make the attention anchor convey the declared `mute_read` without relying on narration or prose. If production cannot realize all five together, fail the scene clearly instead of dropping a pillar or replacing the scene with a text-led slide.
+
 ## HyperFrames handoff
 
 Explicitly invoke the installed $hyperframes entry point and read its instructions, then load hyperframes-core before authoring HTML and hyperframes-cli for initialization, checks, and rendering. Use hyperframes-animation for motion and transitions; consult hyperframes-registry before hand-building a named effect. If the required capabilities are unavailable, fail clearly.
@@ -21,7 +23,7 @@ The explicit --render request supplies render authorization. Run required qualit
 
 ## Local visual asset library
 
-Use `/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets` as the first source for icons, illustrations, technical symbols, emojis, raster backgrounds, and background textures. Prefer its existing assets to inventing new SVG artwork, drawing abstract stand-ins by hand, generating images, or searching external stock libraries whenever a suitable asset expresses the scene's intended meaning. Preserve explicit storybook assets and shared creative-direction requirements.
+Use `/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets` as the first source for icons, illustrations, technical symbols, emojis, raster backgrounds, and background textures. Prefer its existing assets to inventing new SVG artwork, drawing abstract stand-ins by hand, generating images, or searching external stock libraries whenever a suitable asset expresses the scene's intended meaning. Preserve explicit storybook assets and shared creative-direction requirements. Every asset listed in `design_pillars.assets.selected_assets` is required and must remain visibly identifiable in its planned foreground or background role; do not replace it with a generic CSS shape, omit it, or demote it to decoration.
 
 Discover files with `rg --files` and inspect candidates before selecting them; do not guess filenames. General-purpose collections include `core-main-icons`, `heroicons-icons`, `lucide-icons`, and `tabler-icons`; technology-specific collections include `tech-icons`, `tech2-icons`, and `tech3-icons`. Use `emojis-svg` for plain emoji illustrations, reactions, and animated interactions, including checkmarks and crosses. Search by concept, technology name, or emoji name/code point as appropriate. Compose multiple library assets with labels and connectors for explanations rather than redrawing their objects. Create or source new artwork only when the library has no suitable match or the specification requires a different asset.
 

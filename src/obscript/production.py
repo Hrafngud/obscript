@@ -16,6 +16,12 @@ from .storage import creative_direction_reference, file_sha256, read_creative_di
 
 
 FRAME_TOLERANCE_SECONDS = 1 / 30 + 1e-6
+STORYBOOK_SCHEMA_VERSION = "3"
+ASSET_FOREGROUND_COVERAGE = 4 / 5
+ASSET_BACKGROUND_COVERAGE = 1 / 5
+INACTIVE_MOTION = {"", "none", "nenhuma", "nenhum", "n/a", "not applicable", "static", "estático", "estatica", "estática"}
+RASTER_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
+ASSET_LIBRARY_ROOT = Path("/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets")
 
 
 class ProductionError(RuntimeError):
@@ -29,7 +35,7 @@ def normalize_whitespace(text: str) -> str:
 def validate_storybook(
     script: dict, storybook: dict, expected_duration: float
 ) -> None:
-    """Prove exact ordered section coverage and a continuous estimated timeline."""
+    """Validate exact narration/timing plus the five-pillar visual scene contract."""
     schema = read_json(Path(__file__).resolve().parents[2] / "schemas/storybook.schema.json")
     validate_structure(storybook, schema)
     if not math.isfinite(expected_duration) or expected_duration <= 0:
@@ -42,6 +48,8 @@ def validate_storybook(
         raise ContractError("approved script must have unique section IDs")
     coverage: dict[str, list[str]] = {section_id: [] for section_id in section_ids}
     seen_ids: set[str] = set()
+    foreground_asset_scenes = 0
+    raster_background_scenes = 0
     last_section_index = -1
     end = 0.0
     for order, scene in enumerate(storybook["scenes"], 1):
@@ -71,6 +79,56 @@ def validate_storybook(
         for element in scene["asset_requirements"] + scene["visual_elements"]:
             if normalize_whitespace(element["type"]).lower() in audio_types:
                 raise ContractError(f"{scene_id}: audio assets are outside animation production")
+        pillars = scene["design_pillars"]
+        pillar_decisions = {
+            "context.narration_claim": pillars["context"]["narration_claim"],
+            "context.visible_evidence": pillars["context"]["visible_evidence"],
+            "context.accuracy_guardrail": pillars["context"]["accuracy_guardrail"],
+            "animation.explanatory_change": pillars["animation"]["explanatory_change"],
+            "animation.attention_path": pillars["animation"]["attention_path"],
+            "visual_abstraction.primitive": pillars["visual_abstraction"]["primitive"],
+            "visual_abstraction.semantic_mapping": pillars["visual_abstraction"]["semantic_mapping"],
+            "directness.attention_anchor": pillars["directness"]["attention_anchor"],
+            "directness.mute_read": pillars["directness"]["mute_read"],
+        }
+        for field, value in pillar_decisions.items():
+            if normalize_whitespace(value).lower() in INACTIVE_MOTION:
+                raise ContractError(f"{scene_id}: design pillar {field} has no resolved decision")
+        asset_plan = pillars["assets"]
+        selected_assets = asset_plan["selected_assets"]
+        exception_reason = normalize_whitespace(asset_plan["exception_reason"])
+        candidates = set(asset_plan["candidates_considered"])
+        visual_asset_text = "\n".join(item["content"] for item in scene["visual_elements"])
+        requirement_asset_text = "\n".join(item["description"] for item in scene["asset_requirements"])
+        has_foreground = False
+        has_raster_background = False
+        for asset in selected_assets:
+            path = asset["path"]
+            asset_path = Path(path)
+            is_library_asset = asset_path.is_absolute() and asset_path.resolve().is_relative_to(ASSET_LIBRARY_ROOT.resolve())
+            if path not in candidates:
+                raise ContractError(f"{scene_id}: selected asset was not recorded among search candidates: {path}")
+            if is_library_asset and not asset_path.is_file():
+                raise ContractError(f"{scene_id}: selected library asset does not exist: {path}")
+            if path not in visual_asset_text or path not in requirement_asset_text or path not in scene["render_brief"]:
+                raise ContractError(f"{scene_id}: selected asset is not repeated across all scene production fields: {path}")
+            if asset["usage"] == "foreground":
+                has_foreground = has_foreground or is_library_asset
+            else:
+                suffix = Path(path).suffix.lower()
+                if suffix == ".svg":
+                    raise ContractError(f"{scene_id}: SVG assets cannot be used as backgrounds")
+                if "/background1/" in path.replace("\\", "/") and suffix in RASTER_EXTENSIONS:
+                    has_raster_background = True
+        if has_foreground and exception_reason:
+            raise ContractError(f"{scene_id}: foreground-asset exception cannot accompany a selected foreground asset")
+        if not has_foreground and not exception_reason:
+            raise ContractError(f"{scene_id}: no contextual foreground asset was selected and no exception reason was given")
+        foreground_asset_scenes += int(has_foreground)
+        raster_background_scenes += int(has_raster_background)
+        explanatory_motion = [scene["animation"][key] for key in ("continuous", "emphasis", "camera")]
+        if all(normalize_whitespace(value).lower() in INACTIVE_MOTION for value in explanatory_motion):
+            raise ContractError(f"{scene_id}: animation must include explanatory motion beyond entrances and exits")
     for section in sections:
         excerpts = coverage[section["id"]]
         if not excerpts:
@@ -79,6 +137,19 @@ def validate_storybook(
             raise ContractError(f"{section['id']}: voiceover differs from approved narration (missing, duplicated, reordered, or invented text)")
     if end != expected_duration:
         raise ContractError("last scene does not reach expected duration")
+    scene_count = len(storybook["scenes"])
+    required_foreground = math.ceil(scene_count * ASSET_FOREGROUND_COVERAGE)
+    if foreground_asset_scenes < required_foreground:
+        raise ContractError(
+            f"storybook uses contextual foreground assets in {foreground_asset_scenes}/{scene_count} scenes; "
+            f"at least {required_foreground} are required"
+        )
+    required_backgrounds = max(1, math.ceil(scene_count * ASSET_BACKGROUND_COVERAGE))
+    if raster_background_scenes < required_backgrounds:
+        raise ContractError(
+            f"storybook uses verified raster backgrounds in {raster_background_scenes}/{scene_count} scenes; "
+            f"at least {required_backgrounds} are required"
+        )
 
 
 def invalidate_downstream(unit_dir: Path, changed: str) -> None:
@@ -159,6 +230,7 @@ Narration is a timing reference for a human reader. Never generate, source, mix,
 The user explicitly authorized rendering with --render; continue after required quality checks.
 Preserve storybook timestamps and durations, including during transitions and assembly.
 Keep approved narration, scene order, section binding, creative direction, and meaning immutable.
+Treat every scene's design_pillars as binding execution criteria: preserve its context guardrail, use its selected assets for their stated semantic roles, realize its explanatory change and attention path, keep the visual abstraction's mapping consistent, and make the attention anchor readable with narration muted. Do not substitute a text-led slide for the planned visible action.
 Implement every planned raster background from assets/background1, preserving at least the complete storybook's one-in-five scene coverage. Never generate, hand-author, or use an SVG as a background; SVGs are foreground assets only.
 Create durable media only in {output_dir}. Do not modify upstream files or production.yaml.
 Do not claim success until requested local artifacts exist. Report errors clearly.
