@@ -14,6 +14,10 @@ Check:
 - logical continuity and section transitions;
 - natural Brazilian Portuguese and spoken rhythm;
 - repetition and transcript-like or literal-translation phrasing;
+- preservation and purposeful use of the knowledge model's important nuance, including concrete examples, contrasts, caveats, uncertainty, stakes, and surprising details;
+- emotional and intellectual progression: the script should create and resolve appropriate curiosity, tension, surprise, complication, or payoff instead of remaining uniformly expository;
+- technical explanations that build a mental model, mechanism, consequence, or concrete scenario rather than stacking definitions and attributes;
+- an authored voice with varied cadence and meaningful transitions, without generic hype, forced playfulness, or repetitive engagement formulas;
 - adherence to `topics`, `essay`, or preserved-source format;
 - estimated speaking duration against the target.
 
@@ -21,4 +25,4 @@ Estimate duration from the actual narration at a realistic PT-BR explanatory pac
 
 Judge spoken rhythm at a natural pace, not by assuming narration must fit the exact target or each planned section time. When the overall estimate is within tolerance, a section's optimistic timing label alone is not a blocking rhythm defect. Genuine unclear or unnatural narration remains reviewable.
 
-Classify issues by severity and section. Set the verdict to `pass` when no high-severity issue remains and the script is usable as delivered; minor optional improvements alone do not require revision. On a pass, leave recommendation.rerun empty. Otherwise recommend the smallest stage that should be rerun, normally `write-script`; use an earlier stage only for a genuine knowledge-selection or structural defect. Do not rewrite the script in the review.
+Classify issues by severity and section. Do not fail a script because it lacks a particular joke, rhetorical device, or subjective style preference. Treat localized flat phrasing as low or medium severity; use high severity when pervasive flattening, information-dump structure, or loss of essential nuance makes the script materially less clear, engaging, or faithful to the source. Set the verdict to `pass` when no high-severity issue remains and the script is usable as delivered; minor optional improvements alone do not require revision. On a pass, leave recommendation.rerun empty. Otherwise recommend the smallest stage that should be rerun, normally `write-script`; use `plan-script` when the emotional or explanatory progression itself is structurally flat, and an earlier transformation only for a genuine knowledge-selection defect. Do not rewrite the script in the review.

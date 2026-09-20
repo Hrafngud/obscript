@@ -369,7 +369,9 @@ Set narrative.format to {format_name}. Preserve factual content and provenance. 
             schema="plan",
             prompt=f"""Plan a script from {input_path}.
 Format: {spec.format}. Time controller: {spec.time_controller}. Target: {target_seconds} seconds.
-The timed sum of hook and sections should closely match the target. Do not write narration. {feedback}""",
+The timed sum of hook and sections should closely match the target.
+Preserve the strongest source nuances and plan a genuine intellectual and emotional progression, not a topic checklist.
+Make technical sections build a mental model or mechanism before terminology. Do not write narration. {feedback}""",
         )
 
     def _write(
@@ -391,7 +393,8 @@ The timed sum of hook and sections should closely match the target. Do not write
             schema="script",
             prompt=f"""Write the final structured script from knowledge {knowledge_path} and plan {plan_path}.
 Pipeline: {spec.pipeline}. Format: {spec.format}. Time controller: {spec.time_controller}. Target: {target_seconds} seconds.
-Use original, natural spoken PT-BR and introduce no facts absent from the knowledge model. {revision}""",
+Use original, natural spoken PT-BR and introduce no facts absent from the knowledge model.
+Preserve useful nuance through developed examples, contrasts, caveats, and implications. Build an appropriate emotional and intellectual contour, varied spoken cadence, and technical explanations based on mechanisms or concrete scenarios rather than definition dumps. {revision}""",
         )
 
     def _review(
@@ -413,7 +416,7 @@ Expected format: {spec.format}. Expected duration: {target_seconds} seconds.
 Duration tolerance: ±30% of the expected duration. Estimates from {minimum_seconds} to {maximum_seconds} seconds
 inclusive are on_target and must not cause a duration issue or a revise verdict.
 Evaluate speaking pace naturally, not by forcing narration into the exact target or individual planned section times.
-Keep other quality checks; minor optional improvements alone do not require revision.
+Keep other quality checks, including preservation of useful nuance, explanatory mental models, authored cadence, and a non-flat emotional and intellectual progression. Minor optional improvements alone do not require revision.
 Return findings only; do not rewrite the script.""",
         )
 
@@ -613,6 +616,10 @@ No scene may span sections. Timing starts at zero, is continuous, and ends at th
 Production is silent animations only. Narration excerpts are timing references for a human reader.
 Write scene and production directions in English; preserve narration verbatim and keep on-screen labels in the script's language unless shared direction specifies otherwise.
 Describe visible elements, positions, asset references, backgrounds, and timed motion, without re-explaining the narration.
+Build each scene around one evolving visual explanation: a focused real technical action, schematic, infographic, environment, transformation, or accurate visual analogy. Show mechanisms and cause-and-effect instead of printing definitions or narration in containers.
+For technical ideas, use semantically accurate visual primitives such as directed arrows, traveling data tokens, pulses, trees, node graphs, pipelines, queues, layers, state machines, timelines, and charts; preserve their meaning across scenes and never use them as decorative motion.
+Default to one dominant subject and a guided focal path. Use cards, boxes, grids, panels, and side-by-side layouts only when grouping, containment, interface structure, or direct comparison is the concept. Illustrations must act, reveal a relationship, establish a necessary context, or carry a transition; never use them as filler.
+Vary composition and explanatory mode across adjacent scenes. Use motion to transform state, route attention, or demonstrate behavior, not only to make static elements enter.
 Make each render_brief a concise, self-contained imperative paragraph covering the complete scene and its transition.
 Use supplied asset paths exactly; identify assets needing sourcing or creation instead of inventing existing files.
 Use a verified raster image from the local assets/background1 collection as a visible full-frame or substantial background region in at least ceil(total scene count / 5) scenes, with a minimum of one. Distribute those scenes through the video. Tiny accents do not count.
