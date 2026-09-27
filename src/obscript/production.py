@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .contracts import ContractError
+from .asset_refs import ASSET_LIBRARY_ROOT, resolve_asset_links
 from .models import RuntimeConfig
 from .agent import AgentError
 from .opencode_agent import OpenCodeHarness
@@ -21,7 +22,6 @@ ASSET_FOREGROUND_COVERAGE = 4 / 5
 ASSET_BACKGROUND_COVERAGE = 1 / 5
 INACTIVE_MOTION = {"", "none", "nenhuma", "nenhum", "n/a", "not applicable", "static", "estático", "estatica", "estática"}
 RASTER_EXTENSIONS = {".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-ASSET_LIBRARY_ROOT = Path("/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets")
 
 
 class ProductionError(RuntimeError):
@@ -36,6 +36,7 @@ def validate_storybook(
     script: dict, storybook: dict, expected_duration: float
 ) -> None:
     """Validate exact narration/timing plus the five-pillar visual scene contract."""
+    storybook = resolve_asset_links(storybook)
     schema = read_json(Path(__file__).resolve().parents[2] / "schemas/storybook.schema.json")
     validate_structure(storybook, schema)
     if not math.isfinite(expected_duration) or expected_duration <= 0:
@@ -289,6 +290,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         script, review = map(read_json, [script_path, review_path])
         direction = read_creative_direction(direction_path)
         storybook = read_yaml(storybook_path) if storybook_path.suffix in {".yaml", ".yml"} else read_json(storybook_path)
+        storybook = resolve_asset_links(storybook)
         if review["verdict"] != "pass":
             raise ProductionError("Video production requires an approved script")
         reference_path = self.project_root / ".obscript/creative-direction-source.json"

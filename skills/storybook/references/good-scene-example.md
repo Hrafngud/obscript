@@ -32,19 +32,19 @@ In this example, the narration distinguishes making a database faster from avoid
         "dark texture background"
       ],
       "candidates_considered": [
-        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/cache.svg",
-        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/database.png",
-        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/SERVER.png",
+        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg",
+        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png",
+        "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/SERVER.png",
         "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png"
       ],
       "selected_assets": [
         {
-          "path": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/cache.svg",
+          "path": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg",
           "usage": "foreground",
           "semantic_role": "The decision point that stores the first result and intercepts the repeated request."
         },
         {
-          "path": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/database.png",
+          "path": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png",
           "usage": "foreground",
           "semantic_role": "The expensive downstream destination reached only by the first request."
         },
@@ -81,12 +81,12 @@ In this example, the narration distinguishes making a database faster from avoid
   "visual_elements": [
     {
       "type": "foreground illustration",
-      "content": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/cache.svg",
+      "content": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg",
       "role": "Stateful cache node; animate its internal fill and outline glow when the first result is stored."
     },
     {
       "type": "foreground illustration",
-      "content": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/database.png",
+      "content": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png",
       "role": "Downstream database; activate once for the miss and remain inactive for the hit."
     },
     {
@@ -121,18 +121,18 @@ In this example, the narration distinguishes making a database faster from avoid
   "asset_requirements": [
     {
       "type": "foreground cache illustration",
-      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/cache.svg; inline or layer it so the outline and stored-state fill can animate independently."
+      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg; inline or layer it so the outline and stored-state fill can animate independently."
     },
     {
       "type": "foreground database illustration",
-      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/database.png; preserve its aspect ratio and use brightness to distinguish active from dormant state."
+      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png; preserve its aspect ratio and use brightness to distinguish active from dormant state."
     },
     {
       "type": "raster background",
       "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png; tile beyond the full frame at its natural pattern scale and darken it for foreground contrast."
     }
   ],
-  "render_brief": "Tile /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png beyond the full frame at its natural 192 × 192 pattern scale and darken it so the route remains dominant. Place /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/cache.svg large at 46% width and /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/database.png smaller and deeper at 82%, with one directed path entering the cache and continuing to the database. At 0.6 seconds, follow a blue request token into the empty cache; flash 'MISS', continue the same token to the database, and return an amber result square along a separate upper arc. At 3.4 seconds, lock a copy of that square inside the cache and brighten its outline. At 4.4 seconds, return the camera to the unchanged request origin and launch an identical blue token. Stop it inside the cache, replace 'MISS' with 'HIT', pulse the short completed route, and keep the database and its branch dormant. Hold both nodes in frame through 8.0 seconds so the viewer reads avoided database work rather than a faster database. End with no transition."
+  "render_brief": "Tile /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png beyond the full frame at its natural 192 × 192 pattern scale and darken it so the route remains dominant. Place /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg large at 46% width and /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png smaller and deeper at 82%, with one directed path entering the cache and continuing to the database. At 0.6 seconds, follow a blue request token into the empty cache; flash 'MISS', continue the same token to the database, and return an amber result square along a separate upper arc. At 3.4 seconds, lock a copy of that square inside the cache and brighten its outline. At 4.4 seconds, return the camera to the unchanged request origin and launch an identical blue token. Stop it inside the cache, replace 'MISS' with 'HIT', pulse the short completed route, and keep the database and its branch dormant. Hold both nodes in frame through 8.0 seconds so the viewer reads avoided database work rather than a faster database. End with no transition."
 }
 ```
 

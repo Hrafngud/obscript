@@ -5,6 +5,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .asset_refs import resolve_asset_links
 from .production import (
     FRAME_TOLERANCE_SECONDS,
     ProductionAgent,
@@ -62,7 +63,7 @@ Do not claim success until local artifacts exist. Report blockers clearly.
             raise ProductionError("ffprobe is required to verify post-production video")
         script, review = read_json(paths[0]), read_json(paths[1])
         direction = read_creative_direction(direction_path)
-        storybook = read_yaml(paths[3])
+        storybook = resolve_asset_links(read_yaml(paths[3]))
         if review.get("verdict") != "pass":
             raise ProductionError("Post-production requires an approved script")
         approval = read_json(root / ".obscript/approved-inputs.json")

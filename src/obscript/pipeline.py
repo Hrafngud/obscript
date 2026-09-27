@@ -591,8 +591,10 @@ Return findings only; do not rewrite the script.""",
                      render_storybook(storybook, approved.script, direction_path=direction_link)),
                 ]:
                     document = unit_dir / name
-                    if not document.exists() or document.read_text(encoding="utf-8") == old:
-                        if old != new or not document.exists():
+                    legacy = (render_storybook(previous, approved.script, direction_path=direction_link,
+                                               asset_preview_links=False) if name == "storybook.md" else None)
+                    if not document.exists() or document.read_text(encoding="utf-8") in {old, legacy}:
+                        if not document.exists() or document.read_text(encoding="utf-8") != new:
                             document.write_text(new, encoding="utf-8")
                 if previous != storybook:
                     write_json(previous_path, storybook)

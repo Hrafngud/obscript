@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import ContractError
+from .asset_refs import preview_asset_text, resolve_asset_links
 
 
 def read_creative_direction(path: Path) -> str:
@@ -169,7 +170,8 @@ def render_script(script: dict, storybook: dict | None = None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_storybook(storybook: dict, script: dict, *, direction_path: Path | None = None, validation_error: str | None = None) -> str:
+def render_storybook(storybook: dict, script: dict, *, direction_path: Path | None = None,
+                     validation_error: str | None = None, asset_preview_links: bool = True) -> str:
     """Render an Obsidian-readable scene plan, including inspectable invalid drafts."""
     status = "invalid" if validation_error is not None else "validated"
     lines = [
@@ -224,12 +226,22 @@ def render_storybook(storybook: dict, script: dict, *, direction_path: Path | No
         end = timestamp(timing.get("estimated_end_seconds", 0))
         section_id = str(scene.get("script_section_id", "—"))
         voiceover = mapping(scene.get("voiceover"))
+        assets = mapping(mapping(scene.get("design_pillars")).get("assets"))
+        layout = scene.get("render_brief", "—")
+        if asset_preview_links and isinstance(layout, str):
+            try:
+                selected = [asset.get("path") for asset in items(assets.get("selected_assets"))
+                            if isinstance(asset, dict) and isinstance(asset.get("path"), str)]
+                layout = preview_asset_text(layout, [resolve_asset_links(path) for path in selected])
+            except ContractError:
+                if validation_error is None:
+                    raise
         lines.extend([
             f"## {scene.get('id', 'Scene')} · {start} → {end}", "",
             f"**Section:** {section_id} · {sections.get(section_id, 'Unknown section')}", "",
             f"**Duration:** {voiceover.get('estimated_seconds', '—')} s", "",
             "### Scene", "",
-            "**Layout:**", "", scene.get("render_brief", "—"), "",
+            "**Layout:**", "", layout, "",
         ])
     if validation_error is not None:
         lines.extend(["## Invalid structured draft", "", "```json",

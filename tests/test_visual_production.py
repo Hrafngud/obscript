@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from obscript.cli import main
+from obscript.asset_refs import resolve_asset_links
 from obscript.contracts import ContractError, parse_command_tokens
 from obscript.models import RuntimeConfig, SourceAsset
 from obscript.pipeline import Pipeline
@@ -20,8 +21,10 @@ from obscript.production import ProductionAgent, ProductionError, invalidate_dow
 from obscript.storage import creative_direction_reference, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
 
 REPO = Path(__file__).resolve().parents[1]
-FOREGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/api.svg"
+FOREGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/SVG/api.svg"
 BACKGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png"
+DOCKER_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/docker.svg"
+DOCKER_LINK = "[docker](file:///{ref-root}/Globals/assets/tech2-icons/svg/docker.svg)"
 
 
 def script_fixture() -> dict:
@@ -123,6 +126,25 @@ def load_yaml(path: Path) -> dict:
 
 
 class StorybookValidationTests(unittest.TestCase):
+    def test_obsidian_asset_link_validates_as_absolute_path(self):
+        story = story_fixture()
+        scene = story["scenes"][0]
+        scene["design_pillars"]["assets"]["candidates_considered"][0] = DOCKER_LINK
+        scene["design_pillars"]["assets"]["selected_assets"][0]["path"] = DOCKER_LINK
+        scene["visual_elements"][0]["content"] = DOCKER_LINK
+        scene["asset_requirements"][0]["description"] = DOCKER_LINK
+        scene["render_brief"] = scene["render_brief"].replace(FOREGROUND_ASSET, DOCKER_LINK)
+        validate_storybook(script_fixture(), story, 12)
+        self.assertEqual(scene["design_pillars"]["assets"]["selected_assets"][0]["path"], DOCKER_LINK)
+
+    def test_obsidian_asset_link_cannot_escape_library(self):
+        story = story_fixture()
+        story["scenes"][0]["design_pillars"]["assets"]["selected_assets"][0]["path"] = (
+            "[secret](file:///{ref-root}/Globals/assets/../../secret.svg)"
+        )
+        with self.assertRaisesRegex(ContractError, "escapes the library"):
+            validate_storybook(script_fixture(), story, 12)
+
     def test_documented_good_scene_example_is_schema_and_contract_valid(self):
         reference = (REPO / "skills/storybook/references/good-scene-example.md").read_text()
         scene = json.loads(reference.split("```json\n", 1)[1].split("\n```", 1)[0])
@@ -390,6 +412,18 @@ class PipelineVisualTests(unittest.TestCase):
         self.producer.assert_not_called()
         self.assertEqual(read_json(result.project_root / "project.json")["id"], identity)
         self.assertEqual(read_json(result.project_root / "project.json")["phase"], "storybook")
+
+    def test_resume_upgrades_generated_plain_asset_paths_in_readable_storybook(self):
+        result = self.run_pipeline()
+        root = result.project_root
+        old = render_storybook(story_fixture(), script_fixture(),
+                               direction_path=Path("../Globals/creative-direction.md"), asset_preview_links=False)
+        (root / "storybook.md").write_text(old)
+        FakePlanningAgent.calls.clear()
+        self.resume(root, storybook=True)
+        text = (root / "storybook.md").read_text()
+        self.assertIn("[api](file:///{ref-root}/Globals/assets/ilustrations/SVG/api.svg)", text)
+        self.assertFalse(FakePlanningAgent.calls)
 
     def test_storybook_prompt_requires_raster_background_coverage_and_forbids_svg_backgrounds(self):
         self.run_pipeline()
@@ -748,7 +782,8 @@ class ProductionExecutionTests(unittest.TestCase):
         if self.mutate:
             self.paths["script"].write_text("changed upstream")
         self.assertEqual(request["operation"], "video")
-        expected_story = story_fixture()
+        expected_story = resolve_asset_links(load_yaml(self.paths["storybook"]) if self.paths["storybook"].suffix == ".yaml"
+                                             else read_json(self.paths["storybook"]))
         self.assertEqual(request["storybook"]["schema_version"], expected_story["schema_version"])
         self.assertEqual(request["storybook"]["target_duration_seconds"], expected_story["target_duration_seconds"])
         expected_scenes = {scene["id"]: scene for scene in expected_story["scenes"]}
@@ -801,6 +836,29 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(manifest["target_duration_seconds"], 12)
         self.assertEqual(manifest["final_video"], "video.mp4")
         self.assertEqual(manifest["creative_direction"], str(self.paths["direction"]))
+
+    def test_obsidian_links_in_manual_yaml_are_absolute_in_hyperframes_request(self):
+        story = story_fixture()
+        scene = story["scenes"][0]
+        scene["design_pillars"]["assets"]["candidates_considered"][0] = DOCKER_LINK
+        scene["design_pillars"]["assets"]["selected_assets"][0]["path"] = DOCKER_LINK
+        scene["visual_elements"][0]["content"] = DOCKER_LINK
+        scene["asset_requirements"][0]["description"] = DOCKER_LINK
+        scene["render_brief"] = scene["render_brief"].replace(FOREGROUND_ASSET, DOCKER_LINK)
+        yaml_path = self.root / "storybook.yaml"
+        write_yaml(yaml_path, story)
+        self.paths["storybook"] = yaml_path
+        def inspect_request(stage, request_path, output_dir):
+            request = read_json(request_path)
+            asset = request["storybook"]["scenes"][0]["design_pillars"]["assets"]["selected_assets"][0]
+            self.assertEqual(asset["path"], DOCKER_ASSET)
+            self.assertIn(DOCKER_ASSET, request["storybook"]["scenes"][0]["render_brief"])
+            self.assertNotIn("{ref-root}", json.dumps(request["storybook"]))
+            self.execute_fixture(stage, request_path, output_dir)
+        with patch.object(self.agent, "_execute", side_effect=inspect_request), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.produce()
 
     def test_shared_direction_changes_after_planning_block_executor(self):
         reference = self.root / ".obscript/creative-direction-source.json"
@@ -1064,6 +1122,14 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertTrue((output / "executor.log").exists())
 
 class InvalidationAndDryRunTests(unittest.TestCase):
+    def test_readable_storybook_uses_requested_docker_preview_link(self):
+        story = story_fixture()
+        story["scenes"][0]["design_pillars"]["assets"]["selected_assets"][0]["path"] = DOCKER_ASSET
+        story["scenes"][0]["render_brief"] = f"Show {DOCKER_ASSET} at the center."
+        text = render_storybook(story, script_fixture())
+        self.assertIn(DOCKER_LINK, text)
+        self.assertNotIn(DOCKER_ASSET, text)
+
     def test_readable_storybook_focuses_on_scene_directions(self):
         script, story = script_fixture(), story_fixture()
         story["scenes"][0]["render_brief"] = (
@@ -1082,7 +1148,12 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         for scene in story["scenes"]:
             self.assertIn(f"## {scene['id']} ·", text)
             self.assertNotIn(scene["voiceover"]["text"], text)
-            self.assertIn(scene["render_brief"], text)
+            if scene["render_brief"].startswith("Place /icons/node.svg"):
+                self.assertIn(scene["render_brief"], text)
+            else:
+                self.assertIn("[black_mamba](file:///{ref-root}/Globals/assets/background1/black_mamba.png)", text)
+                self.assertIn("[api](file:///{ref-root}/Globals/assets/ilustrations/SVG/api.svg)", text)
+                self.assertNotIn(scene["render_brief"], text)
             self.assertNotIn(scene["narrative_beat"], text)
             self.assertNotIn(scene["visual_goal"], text)
         self.assertIn("00:00:09.000 → 00:00:12.000", text)
@@ -1094,6 +1165,7 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         scene["timing"]["estimated_start_seconds"] = float("nan")
         scene["composition"] = None
         scene["asset_requirements"] = None
+        scene["render_brief"] += " [bad](file:///{ref-root}/Globals/assets/../../bad.svg)"
         text = render_storybook(story, script_fixture(), validation_error="Invalid scene structure")
         self.assertIn("status: invalid", text)
         self.assertIn("Invalid scene structure", text)
@@ -1101,6 +1173,7 @@ class InvalidationAndDryRunTests(unittest.TestCase):
         self.assertIn("scene-004", text)
         self.assertIn('"script_section_id": [', text)
         self.assertIn(scene["voiceover"]["text"], text)
+        self.assertIn("[bad](file:///{ref-root}/Globals/assets/../../bad.svg)", text)
 
     def test_human_reading_cues_preserve_all_approved_narration(self):
         script, story = script_fixture(), story_fixture()

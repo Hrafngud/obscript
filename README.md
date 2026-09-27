@@ -121,6 +121,8 @@ Each stage uses the selected harness's configured default model. Codex uses `med
 
 ## Artifacts
 
+In `storybook.md`, selected library assets appear as Obsidian preview links such as `[docker](file:///{ref-root}/Globals/assets/tech2-icons/svg/docker.svg)`. The structured `storybook.yaml` keeps verified absolute paths for production. If a preview link is entered into the structured plan, validation and HyperFrames production resolve it to the absolute library path.
+
 Each new run creates a collision-safe project under `/home/zalmo/documents/obsidian/Videos/Videos/<project>/`; ID-based runs reuse that directory:
 
 ```text
