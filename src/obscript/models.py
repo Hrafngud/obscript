@@ -14,6 +14,7 @@ class CommandSpec:
     split_count: int | None = None
     render: bool = False
     storybook: bool = False
+    storybook_scene_count: int | None = None
     project_id: str | None = None
     post_production: bool = False
 

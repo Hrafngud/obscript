@@ -33,7 +33,7 @@ def normalize_whitespace(text: str) -> str:
 
 
 def validate_storybook(
-    script: dict, storybook: dict, expected_duration: float
+    script: dict, storybook: dict, expected_duration: float, scene_count: int | None = None,
 ) -> None:
     """Validate exact narration/timing plus the five-pillar visual scene contract."""
     storybook = resolve_asset_links(storybook)
@@ -43,6 +43,13 @@ def validate_storybook(
         raise ContractError("expected duration must be positive and finite")
     if storybook["target_duration_seconds"] != expected_duration:
         raise ContractError("storybook target differs from expected duration")
+    if scene_count is not None:
+        if scene_count < 1:
+            raise ContractError("scene count must be at least 1")
+        if len(storybook["scenes"]) != scene_count:
+            raise ContractError(f"storybook must contain exactly {scene_count} scenes")
+        if scene_count > expected_duration:
+            raise ContractError("scene count cannot exceed target duration in seconds")
     sections = script["sections"]
     section_ids = [section["id"] for section in sections]
     if not section_ids or len(set(section_ids)) != len(section_ids):
@@ -68,6 +75,14 @@ def validate_storybook(
         coverage[section_id].append(scene["voiceover"]["text"])
         timing = scene["timing"]
         start, next_end = timing["estimated_start_seconds"], timing["estimated_end_seconds"]
+        if scene_count is not None:
+            expected_start = expected_duration * (order - 1) // scene_count
+            expected_end = expected_duration * order // scene_count
+            if start != expected_start or next_end != expected_end:
+                raise ContractError(
+                    f"{scene_id}: timing must use the evenly spaced boundaries "
+                    f"{expected_start}–{expected_end} seconds"
+                )
         if start != end:
             raise ContractError(f"{scene_id}: timing gap, overlap, or nonzero first start")
         if next_end <= start:

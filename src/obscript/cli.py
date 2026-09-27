@@ -36,6 +36,7 @@ examples:
   obscript split topics VIDEO --into 4
   obscript extend essay VIDEO --render
   obscript VIDEO --storybook
+  obscript VIDEO --storybook 10
   obscript PROJECT_ID --render
   obscript VIDEO --render --opencode
   obscript PROJECT_ID --render --opencode
@@ -132,8 +133,8 @@ is mandatory and has no translate modifier.
     )
     phase = parser.add_mutually_exclusive_group()
     phase.add_argument(
-        "--storybook", action="store_true",
-        help="continue through storybook validation, without rendering",
+        "--storybook", nargs="?", const=True, default=False, type=int, metavar="SCENES",
+        help="plan a storybook without rendering; optionally require this many evenly timed scenes",
     )
     phase.add_argument(
         "--render", action="store_true",
@@ -205,6 +206,8 @@ def _print_dry_run(spec, project_root: Path | None = None) -> None:
     print(f"target_duration_seconds: {spec.target_duration_seconds or 'automatic'}")
     if spec.split_count:
         print(f"split_count: {spec.split_count}")
+    if spec.storybook_scene_count is not None:
+        print(f"storybook_scene_count: {spec.storybook_scene_count}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -217,6 +220,9 @@ def main(argv: list[str] | None = None) -> int:
             if not post_production_instruction:
                 raise ContractError("--post-production instruction must not be empty")
         post_production_requested = args.post_production is not False
+        storybook_scene_count = args.storybook if type(args.storybook) is int else None
+        if storybook_scene_count is not None and storybook_scene_count < 1:
+            raise ContractError("--storybook scene count must be at least 1")
         if args.opencode_bin and not args.opencode:
             raise ContractError("--opencode-bin requires --opencode")
         if args.render_batch_size is not None and not args.render:
@@ -235,8 +241,9 @@ def main(argv: list[str] | None = None) -> int:
         if project_root:
             if args.project or args.target_duration or args.into is not None:
                 raise ContractError("Resuming a project retains its name, duration, and split settings; omit --project, --target-duration, and --into")
-            spec = resume_spec(project_root, storybook=args.storybook, render=args.render,
-                               post_production=post_production_requested)
+            spec = resume_spec(project_root, storybook=bool(args.storybook), render=args.render,
+                               post_production=post_production_requested,
+                               storybook_scene_count=storybook_scene_count)
             if args.creative_direction is None:
                 args.creative_direction = Path(read_json(project_root / "project.json")["creative_direction"])
         else:
@@ -247,7 +254,8 @@ def main(argv: list[str] | None = None) -> int:
                 target_duration=args.target_duration,
                 split_count=args.into,
                 render=args.render,
-                storybook=args.storybook,
+                storybook=bool(args.storybook),
+                storybook_scene_count=storybook_scene_count,
             )
         if args.review_passes < 1:
             raise ContractError("--review-passes must be at least 1")

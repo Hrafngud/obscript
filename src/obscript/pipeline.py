@@ -113,6 +113,7 @@ class Pipeline:
                 "split_count": spec.split_count,
                 "render": spec.render,
                 "storybook": spec.storybook,
+                "storybook_scene_count": spec.storybook_scene_count,
                 "creative_direction": creative_direction_reference(direction_path, direction) if direction else None,
                 "sources": list(spec.sources),
                 "agent": self.config.agent_name,
@@ -246,7 +247,10 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                     continue
                 if read_creative_direction(direction_path) != direction:
                     raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
-                storybook, storybook_path = self._get_storybook(unit_agent, unit_dir, approved, direction_path, render=spec.render)
+                storybook, storybook_path = self._get_storybook(
+                    unit_agent, unit_dir, approved, direction_path, render=spec.render,
+                    scene_count=spec.storybook_scene_count,
+                )
                 update_project(project_root, phase="storybook", unit=unit_dir)
                 outputs.extend([
                     unit_dir / "script-readable.md",
@@ -556,8 +560,16 @@ Return findings only; do not rewrite the script.""",
 
     def _get_storybook(
         self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
-        direction_path: Path, *, render: bool = False,
+        direction_path: Path, *, render: bool = False, scene_count: int | None = None,
     ) -> tuple[dict, Path]:
+        if scene_count is not None:
+            if scene_count < len(approved.script["sections"]):
+                raise ContractError(
+                    f"--storybook {scene_count} is too few: approved script has "
+                    f"{len(approved.script['sections'])} sections, and scenes cannot span sections"
+                )
+            if scene_count > approved.target_seconds:
+                raise ContractError("scene count cannot exceed target duration in seconds")
         path = unit_dir / "storybook.yaml"
         reference = unit_dir / ".obscript/creative-direction-source.json"
         if path.exists():
@@ -565,7 +577,7 @@ Return findings only; do not rewrite the script.""",
             if storybook.get("schema_version") != STORYBOOK_SCHEMA_VERSION:
                 if not render:
                     invalidate_downstream(unit_dir, "storybook")
-                    return self._create_storybook(agent, unit_dir, approved, direction_path)
+                    return self._create_storybook(agent, unit_dir, approved, direction_path, scene_count=scene_count)
                 raise ContractError(
                     "Storybook uses an obsolete scene contract; run PROJECT_ID --storybook before rendering"
                 )
@@ -575,9 +587,19 @@ Return findings only; do not rewrite the script.""",
                 # Rendering must never silently replace a manually edited plan.
                 if not render:
                     invalidate_downstream(unit_dir, "creative-direction")
-                    return self._create_storybook(agent, unit_dir, approved, direction_path)
+                    return self._create_storybook(agent, unit_dir, approved, direction_path, scene_count=scene_count)
                 raise ContractError("Shared creative direction changed after storybook planning; run PROJECT_ID --storybook before rendering")
-            self._validate_storybook(approved, storybook)
+            if scene_count is not None:
+                scenes = storybook["scenes"]
+                if len(scenes) != scene_count or any(
+                    scene["timing"] != {
+                        "estimated_start_seconds": approved.target_seconds * index // scene_count,
+                        "estimated_end_seconds": approved.target_seconds * (index + 1) // scene_count,
+                    }
+                    for index, scene in enumerate(scenes)
+                ):
+                    return self._create_storybook(agent, unit_dir, approved, direction_path, scene_count=scene_count)
+            self._validate_storybook(approved, storybook, scene_count=scene_count)
             readable_script = unit_dir / "script-readable.md"
             if not readable_script.exists():
                 readable_script.write_text(render_script(approved.script), encoding="utf-8")
@@ -599,17 +621,25 @@ Return findings only; do not rewrite the script.""",
                 if previous != storybook:
                     write_json(previous_path, storybook)
             return storybook, path
-        return self._create_storybook(agent, unit_dir, approved, direction_path)
+        return self._create_storybook(agent, unit_dir, approved, direction_path, scene_count=scene_count)
 
     def _create_storybook(
         self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
-        direction_path: Path,
+        direction_path: Path, *, scene_count: int | None = None,
     ) -> tuple[dict, Path]:
         invalidate_downstream(unit_dir, "storybook")
         (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
         feedback = ""
         direction = read_creative_direction(direction_path)
         direction_link = Path(os.path.relpath(direction_path, unit_dir))
+        scene_instruction = (
+            f"Create exactly {scene_count} scenes. Use scene boundary i = "
+            f"floor({approved.target_seconds} * i / {scene_count}) seconds for i from 0 through {scene_count}; "
+            "set each voiceover.estimated_seconds to its scene interval. Divide narration at meaningful "
+            "points within script sections, while keeping these fixed time slots. Never let a scene span sections."
+            if scene_count is not None else
+            "Choose scene count and timing from meaningful narration and visual turns."
+        )
         # A bounded retry prevents endless planning; all attempts and errors remain inspectable.
         for attempt in range(1, 4):
             storybook, _ = agent.run(
@@ -620,6 +650,7 @@ The shared Markdown is the single source of truth for visual standards. Honor ev
 Blank fields and template suggestions are unspecified, not instructions to invent a new identity.
 Resolve unspecified execution details only in scene specifications. Never create or edit a creative-direction file.
 Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
+{scene_instruction}
 Cover every narration word exactly once in original section order, as contiguous exact excerpts.
 No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
 Production is silent animations only. Narration excerpts are timing references for a human reader.
@@ -639,7 +670,7 @@ Do not request audio, TTS, music, sound effects, or automatic subtitles. Scene t
 Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
             )
             try:
-                self._validate_storybook(approved, storybook)
+                self._validate_storybook(approved, storybook, scene_count=scene_count)
             except ContractError as exc:
                 (unit_dir / "storybook.md").write_text(
                     render_storybook(storybook, approved.script, direction_path=direction_link, validation_error=str(exc)), encoding="utf-8",
@@ -662,8 +693,9 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
             return storybook, unit_dir / "storybook.yaml"
         raise AssertionError("unreachable")
 
-    def _validate_storybook(self, approved: ApprovedScript, storybook: dict) -> None:
-        validate_storybook(approved.script, storybook, approved.target_seconds)
+    def _validate_storybook(self, approved: ApprovedScript, storybook: dict,
+                            scene_count: int | None = None) -> None:
+        validate_storybook(approved.script, storybook, approved.target_seconds, scene_count=scene_count)
 
     def _produce_video(
         self, unit_dir: Path, approved: ApprovedScript, direction_path: Path, storybook_path: Path,

@@ -55,6 +55,7 @@ def parse_command_tokens(
     split_count: int | None = None,
     render: bool = False,
     storybook: bool = False,
+    storybook_scene_count: int | None = None,
 ) -> CommandSpec:
     if not tokens:
         raise ContractError("a source is required")
@@ -90,6 +91,12 @@ def parse_command_tokens(
         if split_count < 2:
             raise ContractError("--into must be at least 2")
 
+    if storybook_scene_count is not None:
+        if not storybook:
+            raise ContractError("a scene count requires --storybook")
+        if storybook_scene_count < 1:
+            raise ContractError("--storybook scene count must be at least 1")
+
     target_seconds = parse_duration(target_duration) if target_duration else None
     if target_seconds is not None and time_controller == "normal" and pipeline != "split":
         raise ContractError(
@@ -105,6 +112,7 @@ def parse_command_tokens(
         split_count=split_count,
         render=render,
         storybook=storybook,
+        storybook_scene_count=storybook_scene_count,
     )
 
 

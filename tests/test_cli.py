@@ -187,8 +187,28 @@ class CliDefaultsTests(unittest.TestCase):
 
     def test_storybook_and_render_are_exclusive(self) -> None:
         self.assertTrue(build_parser().parse_args(["VIDEO", "--storybook"]).storybook)
+        self.assertEqual(build_parser().parse_args(["VIDEO", "--storybook", "10"]).storybook, 10)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             build_parser().parse_args(["VIDEO", "--storybook", "--render"])
+
+    def test_storybook_count_is_validated_and_passed_to_pipeline(self) -> None:
+        for count in ("0", "-2"):
+            with self.subTest(count=count), contextlib.redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(main(["VIDEO", "--storybook", count, "--dry-run"]), 1)
+            self.assertIn("scene count must be at least 1", error.getvalue())
+        with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()):
+            result = pipeline.return_value.run.return_value
+            result.passed_review = True
+            result.outputs = []
+            with tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(main(["VIDEO", "--storybook", "10", "--output-dir", directory,
+                                       "--transcripts-dir", directory]), 0)
+            spec = pipeline.return_value.run.call_args.args[0]
+            self.assertTrue(spec.storybook)
+            self.assertEqual(spec.storybook_scene_count, 10)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(["VIDEO", "--storybook", "10", "--dry-run"]), 0)
+        self.assertIn("storybook_scene_count: 10", output.getvalue())
 
     def test_default_and_storybook_dry_run_stop_at_requested_phase(self) -> None:
         for flags, ending in [([], "review-script"), (["--storybook"], "validate-storybook")]:

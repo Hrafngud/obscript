@@ -27,6 +27,8 @@ Each scene belongs to exactly one script_section_id and contains an exact contig
 
 Use IDs scene-001, scene-002, ... and order 1, 2, ... without gaps. Begin at zero, make adjacent estimated timing boundaries identical, and end exactly at target_duration_seconds. voiceover.estimated_seconds equals the scene's timing interval. Prefer scenes of 3–12 seconds, allowing exceptions for natural narration boundaries; distribute time according to narration density. Place boundaries at meaningful visual or narrative turns, not automatically at every sentence.
 
+When the request specifies a scene count, create exactly that many scenes and use its stated evenly spaced boundaries. This overrides the usual 3–12 second preference. Split each section's narration into contiguous excerpts that fit those scenes; keep section order and never span sections. Let one visual explanation develop through the full scene interval.
+
 Production creates silent animations. A human reads the script and handles all audio separately. voiceover.text is the exact reference passage for that human, not a TTS request. Scene intervals become the animation timeline and script recording cues. Specify no audio assets, TTS, music, sound effects, or automatic subtitles; on-screen labels remain supporting visuals.
 
 ## Think in visual explanations

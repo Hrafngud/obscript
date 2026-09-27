@@ -126,6 +126,31 @@ def load_yaml(path: Path) -> dict:
 
 
 class StorybookValidationTests(unittest.TestCase):
+    def test_requested_count_and_even_boundaries(self):
+        story = story_fixture()
+        validate_storybook(script_fixture(), story, 12, scene_count=4)
+        with self.assertRaisesRegex(ContractError, "exactly 3 scenes"):
+            validate_storybook(script_fixture(), story, 12, scene_count=3)
+
+        script = script_fixture()
+        script["metadata"]["target_duration_seconds"] = 11
+        scenes = [
+            scene_fixture(1, "hook", script["sections"][0]["narration"]),
+            scene_fixture(2, "body", script["sections"][1]["narration"]),
+            scene_fixture(3, "end", script["sections"][2]["narration"]),
+        ]
+        for scene, start, end in zip(scenes, (0, 3, 7), (3, 7, 11)):
+            scene["timing"] = {"estimated_start_seconds": start, "estimated_end_seconds": end}
+            scene["voiceover"]["estimated_seconds"] = end - start
+        uneven = {"schema_version": "3", "target_duration_seconds": 11, "scenes": scenes}
+        validate_storybook(script, uneven, 11, scene_count=3)
+        scenes[1]["timing"] = {"estimated_start_seconds": 3, "estimated_end_seconds": 6}
+        scenes[1]["voiceover"]["estimated_seconds"] = 3
+        scenes[2]["timing"] = {"estimated_start_seconds": 6, "estimated_end_seconds": 11}
+        scenes[2]["voiceover"]["estimated_seconds"] = 5
+        with self.assertRaisesRegex(ContractError, "evenly spaced boundaries"):
+            validate_storybook(script, uneven, 11, scene_count=3)
+
     def test_obsidian_asset_link_validates_as_absolute_path(self):
         story = story_fixture()
         scene = story["scenes"][0]
@@ -348,6 +373,16 @@ class FakePlanningAgent:
         elif skill == "storybook":
             assert "shared creative direction" in prompt
             value = story_fixture()
+            if "Create exactly 3 scenes." in prompt:
+                value["scenes"] = [
+                    scene_fixture(1, "hook", script_fixture()["sections"][0]["narration"]),
+                    scene_fixture(2, "body", script_fixture()["sections"][1]["narration"]),
+                    scene_fixture(3, "end", script_fixture()["sections"][2]["narration"]),
+                ]
+                for index, scene in enumerate(value["scenes"]):
+                    scene["timing"] = {"estimated_start_seconds": index * 4,
+                                       "estimated_end_seconds": (index + 1) * 4}
+                    scene["voiceover"]["estimated_seconds"] = 4
             if self.invalid_storybooks:
                 type(self).invalid_storybooks -= 1
                 value["scenes"][0]["voiceover"]["text"] = "Texto inventado."
@@ -386,11 +421,51 @@ class PipelineVisualTests(unittest.TestCase):
         self.producer.return_value.produce.side_effect = fake_produce
         patch("sys.stdout", new=io.StringIO()).start()
 
-    def run_pipeline(self, tokens=None, render=False, storybook=True):
-        return Pipeline(config_fixture(self.root)).run(parse_command_tokens(tokens or ["source"], render=render, storybook=storybook))
+    def run_pipeline(self, tokens=None, render=False, storybook=True, storybook_scene_count=None):
+        return Pipeline(config_fixture(self.root)).run(parse_command_tokens(
+            tokens or ["source"], render=render, storybook=storybook,
+            storybook_scene_count=storybook_scene_count))
 
-    def resume(self, root, *, storybook=False, render=False):
-        return Pipeline(config_fixture(self.root)).run(resume_spec(root, storybook=storybook, render=render))
+    def resume(self, root, *, storybook=False, render=False, storybook_scene_count=None):
+        return Pipeline(config_fixture(self.root)).run(resume_spec(
+            root, storybook=storybook, render=render, storybook_scene_count=storybook_scene_count))
+
+    def test_requested_count_rebuilds_storybook_and_reuses_matching_plan(self):
+        result = self.run_pipeline(storybook_scene_count=3)
+        root = result.project_root
+        self.assertEqual(len(load_yaml(root / "storybook.yaml")["scenes"]), 3)
+        self.assertIn("Create exactly 3 scenes", FakePlanningAgent.prompts[-1][1])
+        FakePlanningAgent.calls.clear()
+        self.resume(root, storybook=True, storybook_scene_count=3)
+        self.assertNotIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
+        FakePlanningAgent.calls.clear()
+        self.resume(root, storybook=True, storybook_scene_count=4)
+        self.assertEqual(len(load_yaml(root / "storybook.yaml")["scenes"]), 4)
+        self.assertIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
+
+    def test_requested_count_rebuilds_saved_plan_with_uneven_timing(self):
+        result = self.run_pipeline()
+        root = result.project_root
+        story = load_yaml(root / "storybook.yaml")
+        story["scenes"][0]["timing"]["estimated_end_seconds"] = 2
+        story["scenes"][0]["voiceover"]["estimated_seconds"] = 2
+        story["scenes"][1]["timing"]["estimated_start_seconds"] = 2
+        story["scenes"][1]["voiceover"]["estimated_seconds"] = 4
+        write_yaml(root / "storybook.yaml", story)
+        FakePlanningAgent.calls.clear()
+        self.resume(root, storybook=True, storybook_scene_count=4)
+        self.assertIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
+        self.assertEqual(load_yaml(root / "storybook.yaml")["scenes"][0]["timing"]["estimated_end_seconds"], 3)
+
+    def test_requested_count_below_section_count_fails_before_planning(self):
+        with self.assertRaisesRegex(ContractError, "too few"):
+            self.run_pipeline(storybook_scene_count=2)
+        self.assertNotIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
+
+    def test_requested_count_above_target_duration_fails_before_planning(self):
+        with self.assertRaisesRegex(ContractError, "cannot exceed target duration"):
+            self.run_pipeline(storybook_scene_count=13)
+        self.assertNotIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
 
     def test_default_stops_after_script_without_visual_standards(self):
         self.direction.unlink()
