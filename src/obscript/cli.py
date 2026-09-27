@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .agent import AgentError
 from .contracts import ContractError, parse_command_tokens, parse_duration
-from .models import CommandSpec, RuntimeConfig
+from .models import CommandSpec, PostProductionTarget, RuntimeConfig
 from .pipeline import Pipeline
 from .production import ProductionError
 from .projects import create_original_project, find_project, resume_spec
@@ -42,6 +43,8 @@ examples:
   obscript PROJECT_ID --render --opencode
   obscript PROJECT_ID --post-production
   obscript PROJECT_ID --post-production "Resize Linux logo in scene 25 for a bigger scale."
+  obscript PROJECT_ID --post-production "001,006,007" "Fix overlapping animations."
+  obscript PROJECT_ID --post-production "001..002" "Improve the transition."
 
 For remix, comma-separate sources inside one shell argument. PT-BR normalization
 is mandatory and has no translate modifier.
@@ -141,9 +144,9 @@ is mandatory and has no translate modifier.
         help="render silent animations through the installed HyperFrames skill",
     )
     phase.add_argument(
-        "--post-production", nargs="?", const=True, default=False, metavar="INSTRUCTION",
+        "--post-production", nargs="*", default=None, metavar="TARGET_OR_INSTRUCTION",
         help=("polish an existing project's completed render with effects and varied transitions; "
-              "optionally include a custom instruction"),
+              "optionally pass an instruction, or a scene list/adjacent transition followed by an instruction"),
     )
     parser.add_argument(
         "--render-batch-size",
@@ -210,16 +213,43 @@ def _print_dry_run(spec, project_root: Path | None = None) -> None:
         print(f"storybook_scene_count: {spec.storybook_scene_count}")
 
 
+def _post_production_args(values: list[str] | None) -> tuple[PostProductionTarget | None, str | None]:
+    if values is None or not values:
+        return None, None
+    if len(values) > 2:
+        raise ContractError("--post-production accepts at most a scene target and one instruction")
+    if len(values) == 1:
+        instruction = values[0].strip()
+        if not instruction:
+            raise ContractError("--post-production instruction must not be empty")
+        if re.fullmatch(r"\d+(?:,\d+)*|\d+\.\.\d+", instruction):
+            raise ContractError("--post-production scene target requires an instruction")
+        return None, instruction
+    selector, instruction = (value.strip() for value in values)
+    if not instruction:
+        raise ContractError("--post-production instruction must not be empty")
+    if ".." in selector:
+        match = re.fullmatch(r"(\d+)\.\.(\d+)", selector)
+        if not match:
+            raise ContractError("--post-production transition must use FIRST..SECOND")
+        first, second = (int(value) for value in match.groups())
+        if first < 1 or second != first + 1:
+            raise ContractError("--post-production transition scenes must be adjacent and in order")
+        return PostProductionTarget("transition", (f"scene-{first:03d}", f"scene-{second:03d}")), instruction
+    if not re.fullmatch(r"\d+(?:,\d+)*", selector):
+        raise ContractError("--post-production scene target must be comma-separated scene numbers or FIRST..SECOND")
+    numbers = [int(value) for value in selector.split(",")]
+    if any(number < 1 for number in numbers) or len(set(numbers)) != len(numbers):
+        raise ContractError("--post-production scene numbers must be positive and unique")
+    return PostProductionTarget("scenes", tuple(f"scene-{number:03d}" for number in numbers)), instruction
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        post_production_instruction = None
-        if isinstance(args.post_production, str):
-            post_production_instruction = args.post_production.strip()
-            if not post_production_instruction:
-                raise ContractError("--post-production instruction must not be empty")
-        post_production_requested = args.post_production is not False
+        post_production_target, post_production_instruction = _post_production_args(args.post_production)
+        post_production_requested = args.post_production is not None
         storybook_scene_count = args.storybook if type(args.storybook) is int else None
         if storybook_scene_count is not None and storybook_scene_count < 1:
             raise ContractError("--storybook scene count must be at least 1")
@@ -265,6 +295,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"render_batch_size: {args.render_batch_size or 20}")
             if spec.post_production:
                 print(f"post_production_batch_size: {args.post_production_batch_size or 20}")
+                if post_production_target:
+                    print(f"post_production_target: {post_production_target.mode} "
+                          f"{','.join(post_production_target.scene_ids)}")
                 if post_production_instruction:
                     print(f"post_production_instruction: {post_production_instruction}")
             print(f"agent: {'OpenCode CLI' if args.opencode else 'Codex CLI'}")
@@ -301,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
             render_batch_size=args.render_batch_size or 20,
             post_production_batch_size=args.post_production_batch_size or 20,
             post_production_instruction=post_production_instruction,
+            post_production_target=post_production_target,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:
@@ -321,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _new_project(args: argparse.Namespace) -> int:
-    if args.into is not None or args.storybook or args.render or args.post_production:
+    if args.into is not None or args.storybook or args.render or args.post_production is not None:
         raise ContractError("new creates a manual draft; --into, --storybook, --render, and --post-production are not supported")
     title = " ".join(" ".join(args.command[1:]).split()) if len(args.command) > 1 else args.project or "Novo roteiro"
     if not title.strip():

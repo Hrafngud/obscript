@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from obscript.models import PostProductionTarget
 from obscript.post_production import PostProductionAgent
 from obscript.production import ProductionError, invalidate_downstream
 from obscript.storage import creative_direction_reference, file_sha256, read_json, read_yaml, write_json, write_yaml
@@ -203,6 +204,55 @@ class PostProductionTests(unittest.TestCase):
         self.agent.polish()
         self.assertEqual(len(self.calls), 2)
         self.assertEqual(self.requests[-1]["custom_instruction"], revised)
+
+    def test_scene_target_batches_only_selected_scenes_and_changes_cache_key(self):
+        self.install_many_scene_fixture(7, batch_size=2)
+        self.agent.config = replace(self.agent.config, post_production_instruction="Fix overlap",
+                                    post_production_target=PostProductionTarget(
+                                        "scenes", ("scene-007", "scene-001", "scene-006")))
+        self.agent.polish()
+        self.assertEqual([request["batch"]["scene_ids"] for request in self.requests],
+                         [["scene-001", "scene-006"], ["scene-007"]])
+        self.assertEqual([request["target"]["scene_ids"] for request in self.requests],
+                         [["scene-001", "scene-006"], ["scene-007"]])
+        self.assertEqual([len(request["assembly"]["scenes"]) for request in self.requests], [0, 7])
+        self.assertIn("only to target", self.requests[0]["instruction_policy"])
+        self.assertEqual(read_yaml(self.root / "post-production.yaml")["target"]["mode"], "scenes")
+        self.agent.polish()
+        self.assertEqual(len(self.calls), 2)
+        self.agent.config = replace(self.agent.config,
+                                    post_production_target=PostProductionTarget("scenes", ("scene-002",)))
+        self.agent.polish()
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(self.requests[-1]["batch"]["scene_ids"], ["scene-002"])
+
+    def test_transition_target_is_one_batch_and_boundary_only(self):
+        self.install_many_scene_fixture(4, batch_size=2)
+        self.agent.config = replace(self.agent.config, post_production_instruction="Smooth the handoff",
+                                    post_production_target=PostProductionTarget(
+                                        "transition", ("scene-002", "scene-003")))
+        self.agent.polish()
+        self.assertEqual(self.calls, ["post-production"])
+        self.assertEqual(self.requests[0]["batch"]["scene_ids"], ["scene-002", "scene-003"])
+        self.assertEqual(self.requests[0]["target"],
+                         {"mode": "transition", "scene_ids": ["scene-002", "scene-003"]})
+        self.assertEqual(self.requests[0]["focus"], ["selected transition"])
+        self.assertTrue(self.requests[0]["batch"]["render_final"])
+
+    def test_invalid_target_fails_before_writing_outputs(self):
+        for target, instruction, batch_size, message in [
+            (PostProductionTarget("scenes", ("scene-999",)), "Fix", 20, "Unknown"),
+            (PostProductionTarget("transition", ("scene-001", "scene-003")), "Fix", 20, "adjacent"),
+            (PostProductionTarget("transition", ("scene-001", "scene-002")), "Fix", 1, "at least 2"),
+            (PostProductionTarget("scenes", ("scene-001",)), None, 20, "requires an instruction"),
+        ]:
+            with self.subTest(target=target):
+                self.agent.config = replace(self.config, post_production_target=target,
+                                            post_production_instruction=instruction,
+                                            post_production_batch_size=batch_size)
+                with self.assertRaisesRegex(ProductionError, message):
+                    self.agent.polish()
+                self.assertFalse((self.root / "post-production").exists())
 
     def test_retry_skips_completed_batches_and_processes_the_remainder(self):
         self.install_many_scene_fixture(5, batch_size=2)

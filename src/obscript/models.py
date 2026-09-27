@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class SourceAsset:
 
 
 @dataclass(frozen=True)
+class PostProductionTarget:
+    mode: Literal["scenes", "transition"]
+    scene_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     repo_root: Path
     output_dir: Path
@@ -50,6 +57,7 @@ class RuntimeConfig:
     render_batch_size: int = 20
     post_production_batch_size: int = 20
     post_production_instruction: str | None = None
+    post_production_target: PostProductionTarget | None = None
 
     @property
     def agent_executable(self) -> Path:
