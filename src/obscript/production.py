@@ -4,6 +4,7 @@ import json
 import math
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -243,7 +244,9 @@ Do not launch nested agent harness runs or sub-agents.
 Explicitly invoke the installed $hyperframes skill for silent animation production.
 Use the supplied handoff as settled intent; author the general-video project without re-interviewing.
 Narration is a timing reference for a human reader. Never generate, source, mix, or embed audio.
-The user explicitly authorized rendering with --render; continue after required quality checks.
+The user explicitly authorized rendering with --render or --re-render; continue after required quality checks.
+If rerender_scene_id is present, replace that scene's existing render from the current storybook entry,
+then reassemble every scene in assembly.scene_outputs. Leave all other scene media and manifests untouched.
 Preserve storybook timestamps and durations, including during transitions and assembly.
 Keep approved narration, scene order, section binding, creative direction, and meaning immutable.
 Treat every scene's design_pillars as binding execution criteria: preserve its context guardrail, use its selected assets for their stated semantic roles, realize its explanatory change and attention path, keep the visual abstraction's mapping consistent, and make the attention anchor readable with narration muted. Do not substitute a text-led slide for the planned visible action.
@@ -298,7 +301,124 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                 raise ProductionError(f"Production failed during {stage}: {exc}; see {log_path}") from exc
             response_path.write_text(response + "\n", encoding="utf-8")
 
-    def produce(self, *, script_path: Path, direction_path: Path, storybook_path: Path, review_path: Path) -> Path:
+    def _rendered_storybook(self) -> dict:
+        snapshot = self.project_root / "production/storybook.json"
+        if snapshot.is_file():
+            return resolve_asset_links(read_json(snapshot))
+        state = self.project_root / ".obscript"
+        requests = []
+        finals = []
+        for path in state.glob("produce-video*.request.json"):
+            request = read_json(path)
+            requests.append((path.stat().st_mtime_ns, request))
+            if request.get("batch", {}).get("assemble_final"):
+                finals.append((path.stat().st_mtime_ns, request))
+        if not finals:
+            raise ProductionError("Cannot recover the rendered storybook; run PROJECT_ID --render first")
+        _, final = max(finals, key=lambda item: item[0])
+        scene_map = {}
+        for _, request in sorted(requests, key=lambda item: item[0]):
+            for scene in request["storybook"]["scenes"]:
+                scene_map[scene["id"]] = scene
+        scene_ids = [item["scene_id"] for item in final["assembly"]["scene_outputs"]]
+        if len(scene_map) != len(scene_ids) or set(scene_map) != set(scene_ids):
+            raise ProductionError("Cannot recover every rendered scene plan; run PROJECT_ID --render first")
+        for item in final["assembly"]["scene_outputs"]:
+            scene = scene_map[item["scene_id"]]
+            if scene["timing"] != item["timing"] or scene["transition_out"] != item["transition_out"]:
+                raise ProductionError("Recovered scene plan differs from the rendered assembly; run PROJECT_ID --render first")
+        return resolve_asset_links({**final["storybook"], "scenes": [scene_map[scene_id] for scene_id in scene_ids]})
+
+    def _validate_rerender(self, scene_id: str, *, script_path: Path, direction_path: Path,
+                           storybook_path: Path, review_path: Path) -> None:
+        root = self.project_root
+        receipt_path = root / ".obscript/production-inputs.json"
+        approval_path = root / ".obscript/approved-inputs.json"
+        required = [script_path, direction_path, storybook_path, review_path,
+                    receipt_path, approval_path, root / "production.yaml", root / "video.mp4"]
+        if any(not path.is_file() for path in required) or not (root / "production/hyperframes").is_dir():
+            raise ProductionError("--re-render requires a completed render and its editable HyperFrames project")
+        if not shutil.which("ffprobe"):
+            raise ProductionError("ffprobe is required to verify the existing render")
+        script, review = read_json(script_path), read_json(review_path)
+        direction = read_creative_direction(direction_path)
+        current = resolve_asset_links(read_yaml(storybook_path))
+        previous = self._rendered_storybook()
+        if review.get("verdict") != "pass":
+            raise ProductionError("Re-render requires an approved script")
+        approval = read_json(approval_path)
+        if any(not (root / ".obscript" / name).is_file() or
+               file_sha256(root / ".obscript" / name) != approval.get("files", {}).get(name)
+               for name in ["approved-script.json", "knowledge.json", "plan.json", "review.json"]):
+            raise ProductionError("Approved script inputs changed; run PROJECT_ID --render first")
+        reference_path = root / ".obscript/creative-direction-source.json"
+        if not reference_path.is_file() or read_json(reference_path) != creative_direction_reference(direction_path, direction):
+            raise ProductionError("Shared creative direction changed after storybook planning; run PROJECT_ID --storybook and --render first")
+        target = script["metadata"]["target_duration_seconds"]
+        validate_storybook(script, current, target)
+        validate_storybook(script, previous, target)
+        if {key: value for key, value in current.items() if key != "scenes"} != \
+                {key: value for key, value in previous.items() if key != "scenes"}:
+            raise ProductionError("Storybook settings outside the selected scene changed; run PROJECT_ID --render")
+        old_scenes = {scene["id"]: scene for scene in previous["scenes"]}
+        if scene_id not in old_scenes:
+            raise ProductionError(f"Unknown storybook scene: {scene_id}")
+        for scene in current["scenes"]:
+            old = old_scenes.get(scene["id"])
+            if old is None or (scene["id"] != scene_id and scene != old):
+                raise ProductionError(f"{scene['id']}: storybook changed outside the selected scene; run PROJECT_ID --render")
+            if scene["id"] == scene_id and any(scene[field] != old[field] for field in
+                                               ["id", "order", "script_section_id", "voiceover", "timing"]):
+                raise ProductionError(f"{scene_id}: narration, section, and timing must remain unchanged")
+        receipt = read_json(receipt_path)
+        inputs = receipt.get("inputs", {})
+        for path in [script_path, review_path, direction_path]:
+            key = str(path.relative_to(root)) if path.is_relative_to(root) else str(path)
+            if inputs.get(key) != file_sha256(path):
+                raise ProductionError("Approved render inputs changed; run PROJECT_ID --render first")
+        production = read_yaml(root / "production.yaml")
+        if production.get("status") != "complete" or receipt.get("video_sha256") != file_sha256(root / "video.mp4"):
+            raise ProductionError("--re-render requires a verified completed render")
+        if not math.isclose(probe_media(root / "video.mp4"), target, rel_tol=0, abs_tol=FRAME_TOLERANCE_SECONDS):
+            raise ProductionError("Existing video duration differs from the storybook timeline")
+        for scene in previous["scenes"]:
+            self._verify_scene(scene, root / "production/scenes" / scene["id"])
+
+    def rerender(self, *, scene_id: str, script_path: Path, direction_path: Path,
+                 storybook_path: Path, review_path: Path) -> Path:
+        self._validate_rerender(scene_id, script_path=script_path, direction_path=direction_path,
+                                storybook_path=storybook_path, review_path=review_path)
+        root = self.project_root
+        snapshot = root / "production/storybook.json"
+        if not snapshot.exists():
+            write_json(snapshot, self._rendered_storybook())
+        scene_dir = root / "production/scenes" / scene_id
+        preserved = [root / "production.yaml", root / "video.mp4",
+                     root / ".obscript/production-attempt-inputs.json",
+                     root / "production/storybook.json"]
+        with tempfile.TemporaryDirectory(prefix="obscript-rerender-") as directory:
+            backup = Path(directory)
+            shutil.copytree(scene_dir, backup / "scene")
+            for index, path in enumerate(preserved):
+                if path.exists():
+                    shutil.copy2(path, backup / str(index))
+            try:
+                return self.produce(script_path=script_path, direction_path=direction_path,
+                                    storybook_path=storybook_path, review_path=review_path,
+                                    rerender_scene_id=scene_id)
+            except BaseException:
+                if scene_dir.is_symlink():
+                    scene_dir.unlink()
+                elif scene_dir.exists():
+                    shutil.rmtree(scene_dir)
+                shutil.copytree(backup / "scene", scene_dir)
+                for index, path in enumerate(preserved):
+                    if (backup / str(index)).exists():
+                        shutil.copy2(backup / str(index), path)
+                raise
+
+    def produce(self, *, script_path: Path, direction_path: Path, storybook_path: Path, review_path: Path,
+                rerender_scene_id: str | None = None) -> Path:
         if not isinstance(self.config.render_batch_size, int) or isinstance(self.config.render_batch_size, bool) \
                 or self.config.render_batch_size < 1:
             raise ProductionError("Render batch size must be a positive integer")
@@ -315,7 +435,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         validate_storybook(script, storybook, target)
         attempt_path = self.project_root / ".obscript/production-attempt-inputs.json"
         fingerprints = {str(path): file_sha256(path) for path in [script_path, direction_path, storybook_path, review_path]}
-        resume = attempt_path.exists() and read_json(attempt_path) == fingerprints
+        resume = bool(rerender_scene_id) or (attempt_path.exists() and read_json(attempt_path) == fingerprints)
         if not resume:
             invalidate_downstream(self.project_root, "storybook")
         write_json(attempt_path, fingerprints)
@@ -372,7 +492,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                 scene_manifest_path = output_dir / "manifest.json"
                 reusable = False
                 duration = None
-                if resume and scene_manifest_path.exists():
+                if resume and scene["id"] != rerender_scene_id and scene_manifest_path.exists():
                     try:
                         existing_manifest, duration = self._verify_scene(scene, output_dir)
                         reusable = True
@@ -429,6 +549,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                 batch_storybook = {**storybook, "scenes": batch_scenes}
                 write_json(request_path, {
                     "operation": "video", "script": str(script_path), "review": str(review_path),
+                    "rerender_scene_id": rerender_scene_id,
                     "creative_direction": direction, "storybook": batch_storybook,
                     "creative_direction_source": str(direction_path.resolve()),
                     "scene_outputs": batch_outputs,
@@ -486,6 +607,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             assembled_video.replace(final_video)
             manifest.update(status="complete", actual_duration_seconds=duration, final_video="video.mp4")
             self._save_manifest(manifest)
+            write_json(production_dir / "storybook.json", storybook)
             return final_video
         except (ProductionError, OSError, ValueError, KeyError, TypeError) as exc:
             try:
@@ -503,7 +625,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                     })
                     current["artifact"] = str(scene_manifest_path.relative_to(self.project_root))
             final_video = self.project_root / "video.mp4"
-            if final_video.exists():
+            if final_video.exists() and rerender_scene_id is None:
                 final_video.replace(production_dir / "failed-assembly.mp4")
             manifest.update(status="failed", final_video=None, error=str(exc))
             self._save_manifest(manifest)

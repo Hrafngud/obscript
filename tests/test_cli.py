@@ -224,6 +224,41 @@ class CliDefaultsTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             build_parser().parse_args(["VIDEO", "--storybook", "--render"])
 
+    def test_re_render_requires_existing_project_and_positive_scene(self) -> None:
+        self.assertEqual(build_parser().parse_args(["PROJECT_ID", "--re-render", "005"]).re_render, "005")
+        for flag in ["--render", "--storybook", "--post-production"]:
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                build_parser().parse_args(["PROJECT_ID", "--re-render", "005", flag])
+        for scene in ["000", "abc", "-1"]:
+            with self.subTest(scene=scene), contextlib.redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(main(["VIDEO", "--re-render", scene, "--dry-run"]), 1)
+            self.assertIn("positive scene number", error.getvalue())
+        with tempfile.TemporaryDirectory() as directory, patch("obscript.cli.Pipeline") as pipeline:
+            with contextlib.redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(main(["VIDEO", "--re-render", "005", "--vault", directory]), 1)
+            self.assertIn("existing project ID", error.getvalue())
+            pipeline.assert_not_called()
+
+    def test_re_render_resumes_without_other_pipeline_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main([metadata["id"], "--re-render", "005", "--dry-run",
+                                       "--vault", directory]), 0)
+                pipeline.assert_not_called()
+            self.assertIn("re_render_scene: scene-005", output.getvalue())
+            self.assertNotIn("analyze-source", output.getvalue())
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()):
+                result = pipeline.return_value.run.return_value
+                result.passed_review = True
+                result.outputs = []
+                self.assertEqual(main([metadata["id"], "--re-render", "005", "--vault", directory]), 0)
+            spec = pipeline.return_value.run.call_args.args[0]
+            self.assertEqual(spec.rerender_scene_id, "scene-005")
+            self.assertFalse(spec.render)
+
     def test_storybook_count_is_validated_and_passed_to_pipeline(self) -> None:
         for count in ("0", "-2"):
             with self.subTest(count=count), contextlib.redirect_stderr(io.StringIO()) as error:

@@ -39,6 +39,7 @@ examples:
   obscript VIDEO --storybook
   obscript VIDEO --storybook 10
   obscript PROJECT_ID --render
+  obscript PROJECT_ID --re-render 005
   obscript VIDEO --render --opencode
   obscript PROJECT_ID --render --opencode
   obscript PROJECT_ID --post-production
@@ -144,6 +145,10 @@ is mandatory and has no translate modifier.
         help="render silent animations through the installed HyperFrames skill",
     )
     phase.add_argument(
+        "--re-render", metavar="SCENE",
+        help="re-render one scene from its current storybook entry and reassemble the video",
+    )
+    phase.add_argument(
         "--post-production", nargs="*", default=None, metavar="TARGET_OR_INSTRUCTION",
         help=("polish an existing project's completed render with effects and varied transitions; "
               "optionally pass an instruction, or a scene list/adjacent transition followed by an instruction"),
@@ -184,6 +189,11 @@ def _resolve_opencode(requested: Path | None, *, resume: bool = False) -> Path:
 
 
 def _print_dry_run(spec, project_root: Path | None = None) -> None:
+    if spec.rerender_scene_id:
+        print(f"resume project: {spec.project_id} ({project_root})")
+        print("pipeline: validate-render → re-render-scene → reassemble-video → verify-render")
+        print(f"re_render_scene: {spec.rerender_scene_id}")
+        return
     if spec.post_production:
         print(f"resume project: {spec.project_id} ({project_root})")
         print("pipeline: validate-production → post-production → verify-post-production")
@@ -250,6 +260,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         post_production_target, post_production_instruction = _post_production_args(args.post_production)
         post_production_requested = args.post_production is not None
+        rerender_scene_id = None
+        if args.re_render is not None:
+            if not re.fullmatch(r"\d+", args.re_render) or int(args.re_render) < 1:
+                raise ContractError("--re-render requires a positive scene number")
+            rerender_scene_id = f"scene-{int(args.re_render):03d}"
         storybook_scene_count = args.storybook if type(args.storybook) is int else None
         if storybook_scene_count is not None and storybook_scene_count < 1:
             raise ContractError("--storybook scene count must be at least 1")
@@ -273,12 +288,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise ContractError("Resuming a project retains its name, duration, and split settings; omit --project, --target-duration, and --into")
             spec = resume_spec(project_root, storybook=bool(args.storybook), render=args.render,
                                post_production=post_production_requested,
-                               storybook_scene_count=storybook_scene_count)
+                               storybook_scene_count=storybook_scene_count,
+                               rerender_scene_id=rerender_scene_id)
             if args.creative_direction is None:
                 args.creative_direction = Path(read_json(project_root / "project.json")["creative_direction"])
         else:
             if post_production_requested:
                 raise ContractError("--post-production requires an existing project ID; render the project with --render first")
+            if rerender_scene_id:
+                raise ContractError("--re-render requires an existing project ID; render the project with --render first")
             spec = parse_command_tokens(
                 args.command,
                 target_duration=args.target_duration,
@@ -355,8 +373,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _new_project(args: argparse.Namespace) -> int:
-    if args.into is not None or args.storybook or args.render or args.post_production is not None:
-        raise ContractError("new creates a manual draft; --into, --storybook, --render, and --post-production are not supported")
+    if args.into is not None or args.storybook or args.render or args.re_render or args.post_production is not None:
+        raise ContractError("new creates a manual draft; --into, --storybook, --render, --re-render, and --post-production are not supported")
     title = " ".join(" ".join(args.command[1:]).split()) if len(args.command) > 1 else args.project or "Novo roteiro"
     if not title.strip():
         raise ContractError("the script title must not be empty")

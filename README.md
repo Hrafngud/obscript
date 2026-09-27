@@ -47,7 +47,7 @@ obscript new --dry-run
 
 `new` creates a collision-safe project folder containing `script.md`, `project.json`, and `run.yaml`. Open `script.md` in Obsidian or your editor and replace the thesis and narration placeholders. The template uses the existing PT-BR Markdown front matter and includes hook, introduction, development, and conclusion sections. Its defaults are title `Novo roteiro`, format `topics`, and a 10-minute target; `--project` supplies the title when no positional title is given. `--format` accepts `source`, `topics`, or `essay` for this command.
 
-Original projects receive a permanent UUID, timestamps, shared creative-direction path, and `origin: original` / `status: draft` metadata. Their source list is empty. Creation needs neither ytstt nor Codex, does not create a transcripts directory, and does not require the shared creative-direction file to exist. These are manual drafts: `new` does not generate or review narration, and ID-based storybook/render processing is not supported for these projects. `--storybook`, `--render`, and `--into` are rejected with `new`. A dry run creates no files.
+Original projects receive a permanent UUID, timestamps, shared creative-direction path, and `origin: original` / `status: draft` metadata. Their source list is empty. Creation needs neither ytstt nor Codex, does not create a transcripts directory, and does not require the shared creative-direction file to exist. These are manual drafts: `new` does not generate or review narration, and ID-based storybook/render processing is not supported for these projects. `--storybook`, `--render`, `--re-render`, and `--into` are rejected with `new`. A dry run creates no files.
 
 For processing existing sources, the positional grammar is:
 
@@ -70,6 +70,7 @@ obscript split compress essay VIDEO --target-duration 8m
 obscript PROJECT_ID --storybook
 obscript PROJECT_ID --storybook 10
 obscript PROJECT_ID --render
+obscript PROJECT_ID --re-render 005
 obscript PROJECT_ID --render --render-batch-size 10
 obscript VIDEO --render --opencode
 obscript PROJECT_ID --render --opencode
@@ -114,13 +115,15 @@ Each new project has a permanent UUID in `project.json`, printed before processi
 
 For manual visual edits, change `storybook.yaml`, the authoritative production plan. Resuming revalidates it without regenerating it, including its exact narration and timing constraints. Invalid edits remain available for correction and block rendering. `storybook.md` is the readable view; edits to that Markdown are preserved as notes but do not change the structured render plan. Readable storybooks and script timestamp cues are refreshed from YAML changes when their Markdown has not been manually edited. Reviewed structured script inputs cannot be changed while reusing their old approval.
 
+After a completed render, use `obscript PROJECT_ID --re-render 005` to re-read scene 005 from `storybook.yaml`, replace only that scene's silent render, and reassemble `video.mp4` from all scene outputs. The scene number must exist, and narration, section, timing, shared direction, and every other scene's storybook entry must remain unchanged. A successful rerender archives any older post-production output as stale. If rendering fails, the previous `video.mp4` and scene media are restored. This option requires an existing project with exactly one video and its editable HyperFrames project; split or playlist projects with multiple videos are ambiguous under a single scene number. It is mutually exclusive with `--storybook`, `--render`, and `--post-production`.
+
 Planning and production both read the same shared `Globals/creative-direction.md`; no per-video creative-direction file or visual identity-generation stage is created. Use `--creative-direction FILE` to select another shared file, including when using a different `--output-dir` or `--vault`. The shared file must exist and contain standards or a field template for storybook or render requests; script-only runs and dry runs do not read it. Filled fields are binding; blank fields and suggestions remain unspecified, with execution details resolved in each scene plan. Obscript never edits the shared file. After storybook validation, `script.md` includes section and scene timestamp cues for a human reader. Rendering does not change the approved narration and uses local HyperFrames projects with Node.js 22+, FFmpeg/ffprobe, and the installed HyperFrames skills.
 
 The workflow is script → timed animations → human voiceover and audio editing. Obscript generates no audio, TTS, music, sound effects, or automatic subtitles. Storybook timestamps define the animation timeline and the human recording cues; production never retimes scenes against generated speech.
 
 Each stage uses the selected harness's configured default model. Codex uses `medium` reasoning effort by default; override it with `--reasoning-effort`. OpenCode uses its own configured reasoning settings; the Codex reasoning option does not override them. `--model` overrides the model in either harness (OpenCode expects `provider/model`).
 
-`--opencode` applies to every agent stage: analysis, remix/split, duration and format transformations, planning, writing, review, storybook, rendering, and post-production. It works with sources and project IDs, for example `obscript PROJECT_ID --post-production --opencode`. Completed checkpoints and verified media are shared between harnesses; pass `--opencode` on any invocation that should use OpenCode, or omit it to use Codex. `--opencode-bin FILE` overrides OpenCode's executable and requires `--opencode`; `--codex FILE` and `--opencode` are mutually exclusive. Dry runs require neither harness to be installed.
+`--opencode` applies to every agent stage: analysis, remix/split, duration and format transformations, planning, writing, review, storybook, rendering, rerendering, and post-production. It works with sources and project IDs, for example `obscript PROJECT_ID --post-production --opencode`. Completed checkpoints and verified media are shared between harnesses; pass `--opencode` on any invocation that should use OpenCode, or omit it to use Codex. `--opencode-bin FILE` overrides OpenCode's executable and requires `--opencode`; `--codex FILE` and `--opencode` are mutually exclusive. Dry runs require neither harness to be installed.
 
 ## Artifacts
 

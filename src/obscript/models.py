@@ -18,6 +18,7 @@ class CommandSpec:
     storybook_scene_count: int | None = None
     project_id: str | None = None
     post_production: bool = False
+    rerender_scene_id: str | None = None
 
 
 @dataclass(frozen=True)

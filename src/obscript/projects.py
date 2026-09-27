@@ -90,7 +90,8 @@ def create_original_project(output_dir: Path, title: str, spec: CommandSpec,
 
 
 def resume_spec(root: Path, *, storybook: bool, render: bool, post_production: bool = False,
-                storybook_scene_count: int | None = None) -> CommandSpec:
+                storybook_scene_count: int | None = None,
+                rerender_scene_id: str | None = None) -> CommandSpec:
     metadata = read_json(root / "project.json")
     if metadata.get("origin") == "original":
         raise ContractError(f"Original projects are manual drafts; edit {root / 'script.md'}. "
@@ -99,7 +100,8 @@ def resume_spec(root: Path, *, storybook: bool, render: bool, post_production: b
     command["sources"] = tuple(command["sources"])
     return replace(CommandSpec(**command), storybook=storybook, render=render,
                    post_production=post_production, project_id=metadata["id"],
-                   storybook_scene_count=storybook_scene_count)
+                   storybook_scene_count=storybook_scene_count,
+                   rerender_scene_id=rerender_scene_id)
 
 
 def update_project(root: Path, *, phase: str | None = None, unit: Path | None = None,

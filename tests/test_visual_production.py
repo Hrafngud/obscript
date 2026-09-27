@@ -18,7 +18,7 @@ from obscript.models import RuntimeConfig, SourceAsset
 from obscript.pipeline import Pipeline
 from obscript.projects import resume_spec
 from obscript.production import ProductionAgent, ProductionError, invalidate_downstream, probe_media, validate_storybook
-from obscript.storage import creative_direction_reference, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
+from obscript.storage import creative_direction_reference, file_sha256, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 FOREGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/SVG/api.svg"
@@ -645,6 +645,34 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertEqual(metadata["phase"], "post-production")
         self.assertEqual(set(metadata["units"].values()), {"post-production"})
 
+    def test_re_render_uses_only_saved_video_and_archives_stale_polish(self):
+        result = self.run_pipeline(render=True)
+        root = result.project_root
+        polished = root / "video-polished.mp4"
+        polished.write_bytes(b"old polish")
+        write_yaml(root / "post-production.yaml", {"status": "complete"})
+        FakePlanningAgent.calls.clear()
+        self.producer.return_value.rerender.return_value = root / "video.mp4"
+        spec = resume_spec(root, storybook=False, render=False, rerender_scene_id="scene-002")
+        resumed = Pipeline(config_fixture(self.root)).run(spec)
+        self.producer.return_value.rerender.assert_called_once()
+        self.assertEqual(self.producer.return_value.rerender.call_args.kwargs["scene_id"], "scene-002")
+        self.assertFalse(FakePlanningAgent.calls)
+        self.ingest.assert_called_once()
+        self.assertEqual(resumed.outputs[0], root / "video.mp4")
+        self.assertEqual(read_json(root / "project.json")["phase"], "render")
+        self.assertFalse(polished.exists())
+        self.assertTrue(list((root / ".obscript/invalidated").rglob("video-polished.mp4")))
+
+    def test_re_render_rejects_multi_video_project_without_touching_units(self):
+        result = self.run_pipeline(["split", "source"], render=True)
+        self.producer.reset_mock()
+        spec = resume_spec(result.project_root, storybook=False, render=False,
+                           rerender_scene_id="scene-001")
+        with self.assertRaisesRegex(ContractError, "exactly one video"):
+            Pipeline(config_fixture(self.root)).run(spec)
+        self.producer.assert_not_called()
+
     def test_post_production_requires_completed_render(self):
         result = self.run_pipeline()
         spec = resume_spec(result.project_root, storybook=False, render=False, post_production=True)
@@ -892,11 +920,113 @@ class ProductionExecutionTests(unittest.TestCase):
         Path(request["output_video"]).write_bytes(b"assembled fixture")
 
     def probe_fixture(self, path):
-        return self.duration if path.name == "assembled.mp4" else self.scene_duration
+        return self.duration if path.name in {"assembled.mp4", "video.mp4"} else self.scene_duration
 
     def patched_produce(self):
         with patch.object(self.agent, "_execute", side_effect=self.execute_fixture), patch("obscript.production.probe_media", side_effect=self.probe_fixture), patch("obscript.production.shutil.which", return_value="ffprobe"):
             return self.produce()
+
+    def _completed_render_for_rerender(self):
+        approved_path = self.root / ".obscript/approved-script.json"
+        write_json(approved_path, read_json(self.paths["script"]))
+        self.paths["script"] = approved_path
+        yaml_path = self.root / "storybook.yaml"
+        write_yaml(yaml_path, story_fixture())
+        self.paths["storybook"] = yaml_path
+        reference = self.root / ".obscript/creative-direction-source.json"
+        write_json(reference, creative_direction_reference(self.paths["direction"], direction_fixture()))
+        for name in ["knowledge.json", "plan.json"]:
+            write_json(self.root / ".obscript" / name, {})
+        write_json(self.root / ".obscript/approved-inputs.json", {
+            "files": {name: file_sha256(self.root / ".obscript" / name)
+                      for name in ["approved-script.json", "knowledge.json", "plan.json", "review.json"]},
+        })
+        self.patched_produce()
+        (self.root / "production/hyperframes").mkdir()
+        inputs = {str(path.relative_to(self.root)) if path.is_relative_to(self.root) else str(path):
+                  file_sha256(path)
+                  for path in [self.paths["script"], self.paths["review"],
+                               self.paths["direction"], self.paths["storybook"]]}
+        write_json(self.root / ".obscript/production-inputs.json",
+                   {"inputs": inputs, "video_sha256": file_sha256(self.root / "video.mp4")})
+        self.calls.clear()
+
+    def _patched_rerender(self, scene_id="scene-002"):
+        with patch.object(self.agent, "_execute", side_effect=self.execute_fixture), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            return self.agent.rerender(scene_id=scene_id, script_path=self.paths["script"],
+                                       direction_path=self.paths["direction"],
+                                       storybook_path=self.paths["storybook"], review_path=self.paths["review"])
+
+    def test_rerender_only_selected_scene_and_reassembles_every_scene(self):
+        self._completed_render_for_rerender()
+        story = load_yaml(self.paths["storybook"])
+        story["scenes"][1]["render_brief"] += " Larger icon."
+        write_yaml(self.paths["storybook"], story)
+        other_media = {scene_id: (self.root / "production/scenes" / scene_id / "scene.mp4").read_bytes()
+                       for scene_id in ["scene-001", "scene-003", "scene-004"]}
+        def inspect(stage, request_path, output_dir):
+            request = read_json(request_path)
+            self.assertEqual(request["rerender_scene_id"], "scene-002")
+            self.assertEqual([scene["id"] for scene in request["storybook"]["scenes"]], ["scene-002"])
+            self.assertEqual(len(request["assembly"]["scene_outputs"]), 4)
+            self.assertEqual(request["storybook"]["scenes"][0]["render_brief"], story["scenes"][1]["render_brief"])
+            self.execute_fixture(stage, request_path, output_dir)
+        with patch.object(self.agent, "_execute", side_effect=inspect), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.agent.rerender(scene_id="scene-002", script_path=self.paths["script"],
+                                direction_path=self.paths["direction"],
+                                storybook_path=self.paths["storybook"], review_path=self.paths["review"])
+        self.assertEqual(self.calls, ["produce-video"])
+        self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
+        self.assertEqual(read_json(self.root / "production/storybook.json")["scenes"][1]["render_brief"],
+                         story["scenes"][1]["render_brief"])
+        for scene_id, original in other_media.items():
+            self.assertEqual((self.root / "production/scenes" / scene_id / "scene.mp4").read_bytes(), original)
+
+    def test_rerender_rejects_edits_to_other_scenes(self):
+        self._completed_render_for_rerender()
+        story = load_yaml(self.paths["storybook"])
+        story["scenes"][0]["render_brief"] += " Changed elsewhere."
+        write_yaml(self.paths["storybook"], story)
+        with patch.object(self.agent, "_execute") as execute, \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaisesRegex(ProductionError, "outside the selected scene"):
+                self.agent.rerender(scene_id="scene-002", script_path=self.paths["script"],
+                                    direction_path=self.paths["direction"],
+                                    storybook_path=self.paths["storybook"], review_path=self.paths["review"])
+        execute.assert_not_called()
+
+    def test_rerender_recovers_storybook_from_older_render_requests(self):
+        self._completed_render_for_rerender()
+        (self.root / "production/storybook.json").unlink()
+        story = load_yaml(self.paths["storybook"])
+        story["scenes"][1]["render_brief"] += " Revised from YAML."
+        write_yaml(self.paths["storybook"], story)
+        self._patched_rerender()
+        self.assertEqual(self.calls, ["produce-video"])
+        self.assertEqual(read_json(self.root / "production/storybook.json")["scenes"][1]["render_brief"],
+                         story["scenes"][1]["render_brief"])
+
+    def test_failed_rerender_restores_previous_video_and_scene(self):
+        self._completed_render_for_rerender()
+        story = load_yaml(self.paths["storybook"])
+        story["scenes"][1]["render_brief"] += " Changed visual."
+        write_yaml(self.paths["storybook"], story)
+        previous_video = (self.root / "video.mp4").read_bytes()
+        previous_scene = (self.root / "production/scenes/scene-002/scene.mp4").read_bytes()
+        self.failure = "scene-002"
+        with self.assertRaises(ProductionError):
+            self._patched_rerender()
+        self.assertEqual((self.root / "video.mp4").read_bytes(), previous_video)
+        self.assertEqual((self.root / "production/scenes/scene-002/scene.mp4").read_bytes(), previous_scene)
+        self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
+        self.failure = None
+        self._patched_rerender()
+        self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
 
     def test_single_run_produces_complete_storybook_and_actual_duration(self):
         output = self.patched_produce()

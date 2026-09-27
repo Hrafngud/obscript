@@ -65,6 +65,8 @@ class Pipeline:
     def run(self, spec: CommandSpec) -> PipelineResult:
         if spec.post_production and not spec.project_id:
             raise ContractError("Post-production requires an existing project ID")
+        if spec.rerender_scene_id and not spec.project_id:
+            raise ContractError("Re-render requires an existing project ID")
         if spec.project_id:
             project_root = find_project(self.config.output_dir, spec.project_id)
             if project_root is None:
@@ -84,13 +86,15 @@ class Pipeline:
         except Exception as exc:
             update_project(project_root, status="failed", error=str(exc))
             raise
-        phase = "post-production" if spec.post_production else "render" if spec.render else "storybook" if spec.storybook else "script"
+        phase = "post-production" if spec.post_production else "render" if spec.render or spec.rerender_scene_id else "storybook" if spec.storybook else "script"
         update_project(project_root, phase=phase if result.passed_review else None,
                        status="complete" if result.passed_review else "needs_review",
                        creative_direction=self.config.creative_direction_path)
         return result
 
     def _run(self, spec: CommandSpec, project_root: Path) -> PipelineResult:
+        if spec.rerender_scene_id:
+            return self._run_re_render(project_root, spec.rerender_scene_id)
         if spec.post_production:
             return self._run_post_production(project_root)
         direction_path = self.config.creative_direction_path
@@ -262,6 +266,42 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                     outputs.append(unit_dir / "production.yaml")
                     update_project(project_root, phase="render", unit=unit_dir)
         return PipelineResult(project_root, tuple(outputs), all_passed)
+
+    def _run_re_render(self, project_root: Path, scene_id: str) -> PipelineResult:
+        metadata = read_json(project_root / "project.json")
+        units = metadata.get("units", {})
+        if len(units) != 1:
+            raise ContractError("--re-render requires a project with exactly one video")
+        name, phase = next(iter(units.items()))
+        if phase not in {"render", "post-production"}:
+            raise ContractError("--re-render requires a completed render; run PROJECT_ID --render first")
+        unit_dir = (project_root / name).resolve()
+        if not unit_dir.is_relative_to(project_root.resolve()):
+            raise ContractError("Invalid production unit path")
+        script_path = unit_dir / ".obscript/approved-script.json"
+        review_path = unit_dir / ".obscript/review.json"
+        direction_path = self.config.creative_direction_path
+        storybook_path = unit_dir / "storybook.yaml"
+        producer = ProductionAgent(self.config, unit_dir)
+        video = producer.rerender(
+            scene_id=scene_id, script_path=script_path, direction_path=direction_path,
+            storybook_path=storybook_path, review_path=review_path,
+        )
+        receipt_path = unit_dir / ".obscript/production-inputs.json"
+        inputs = {str(path.relative_to(unit_dir)) if path.is_relative_to(unit_dir) else str(path):
+                  file_sha256(path)
+                  for path in [script_path, review_path, direction_path, storybook_path]}
+        write_json(receipt_path, {"inputs": inputs, "video_sha256": file_sha256(video)})
+        approved_script = read_json(script_path)
+        approved = ApprovedScript(
+            approved_script, script_path, unit_dir / ".obscript/knowledge.json",
+            unit_dir / ".obscript/plan.json", review_path,
+            approved_script["metadata"]["target_duration_seconds"],
+        )
+        self._get_storybook(self._agent(unit_dir), unit_dir, approved, direction_path, render=True)
+        invalidate_downstream(unit_dir, "post-production")
+        update_project(project_root, phase="render", unit=unit_dir)
+        return PipelineResult(project_root, (video, unit_dir / "production.yaml"), True)
 
     def _run_post_production(self, project_root: Path) -> PipelineResult:
         metadata = read_json(project_root / "project.json")
