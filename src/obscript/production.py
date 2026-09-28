@@ -14,7 +14,8 @@ from .models import RuntimeConfig
 from .agent import AgentError
 from .opencode_agent import OpenCodeHarness
 from .schema_validation import validate_structure
-from .storage import creative_direction_reference, file_sha256, read_creative_direction, read_json, read_yaml, write_json, write_yaml
+from .storage import creative_direction_reference, file_sha256, read_creative_direction, read_json, read_yaml, render_storybook, write_json, write_yaml
+from .storybook_edits import apply_readable_storybook
 
 
 FRAME_TOLERANCE_SECONDS = 1 / 30 + 1e-6
@@ -250,6 +251,7 @@ then reassemble every scene in assembly.scene_outputs. Leave all other scene med
 Preserve storybook timestamps and durations, including during transitions and assembly.
 Keep approved narration, scene order, section binding, creative direction, and meaning immutable.
 Treat every scene's design_pillars as binding execution criteria: preserve its context guardrail, use its selected assets for their stated semantic roles, realize its explanatory change and attention path, keep the visual abstraction's mapping consistent, and make the attention anchor readable with narration muted. Do not substitute a text-led slide for the planned visible action.
+The readable storybook's manually edited Layout is the controlling scene direction in render_brief. Apply manual_visual_direction from the request across the batch. When older structured visual fields differ from that human direction, follow the human direction while preserving narration, timing, and factual meaning.
 Implement every planned raster background from assets/background1, preserving at least the complete storybook's one-in-five scene coverage. Never generate, hand-author, or use an SVG as a background; SVGs are foreground assets only.
 Create durable media only in {output_dir}. Do not modify upstream files or production.yaml.
 Do not claim success until requested local artifacts exist. Report errors clearly.
@@ -343,6 +345,13 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         script, review = read_json(script_path), read_json(review_path)
         direction = read_creative_direction(direction_path)
         current = resolve_asset_links(read_yaml(storybook_path))
+        readable_path = root / "storybook.md"
+        if readable_path.is_file():
+            baseline_path = root / ".obscript/storybook.json"
+            baseline = read_json(baseline_path) if baseline_path.is_file() else current
+            current, _, _ = apply_readable_storybook(
+                current, readable_path.read_text(encoding="utf-8"), render_storybook(baseline, script),
+            )
         previous = self._rendered_storybook()
         if review.get("verdict") != "pass":
             raise ProductionError("Re-render requires an approved script")
@@ -426,6 +435,15 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         direction = read_creative_direction(direction_path)
         storybook = read_yaml(storybook_path) if storybook_path.suffix in {".yaml", ".yml"} else read_json(storybook_path)
         storybook = resolve_asset_links(storybook)
+        readable_path = self.project_root / "storybook.md"
+        manual_visual_direction = ""
+        if readable_path.is_file():
+            baseline_path = self.project_root / ".obscript/storybook.json"
+            baseline = read_json(baseline_path) if baseline_path.is_file() else storybook
+            baseline_markdown = render_storybook(baseline, script)
+            storybook, manual_visual_direction, _ = apply_readable_storybook(
+                storybook, readable_path.read_text(encoding="utf-8"), baseline_markdown,
+            )
         if review["verdict"] != "pass":
             raise ProductionError("Video production requires an approved script")
         reference_path = self.project_root / ".obscript/creative-direction-source.json"
@@ -434,7 +452,8 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         target = script["metadata"]["target_duration_seconds"]
         validate_storybook(script, storybook, target)
         attempt_path = self.project_root / ".obscript/production-attempt-inputs.json"
-        fingerprints = {str(path): file_sha256(path) for path in [script_path, direction_path, storybook_path, review_path]}
+        fingerprints = {str(path): file_sha256(path) for path in
+                        [script_path, direction_path, storybook_path, review_path, readable_path] if path.is_file()}
         resume = bool(rerender_scene_id) or (attempt_path.exists() and read_json(attempt_path) == fingerprints)
         if not resume:
             invalidate_downstream(self.project_root, "storybook")
@@ -470,10 +489,12 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             changed = [path for path, original in inputs.items() if not path.exists() or path.read_bytes() != original]
             if changed:
                 for path in changed:
-                    if path == direction_path:
+                    if path == direction_path or path == readable_path:
                         continue
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(inputs[path])
+                if readable_path in changed:
+                    raise ProductionError("Readable storybook changed during rendering; your edits were preserved. Run --render again to use them")
                 raise ProductionError("Production attempted to modify immutable upstream inputs")
             if any(not path.exists() or file_sha256(path) != digest for path, digest in reused_media.items()):
                 raise ProductionError("Production modified verified scene media that was marked for reuse")
@@ -551,6 +572,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                     "operation": "video", "script": str(script_path), "review": str(review_path),
                     "rerender_scene_id": rerender_scene_id,
                     "creative_direction": direction, "storybook": batch_storybook,
+                    "manual_visual_direction": manual_visual_direction,
                     "creative_direction_source": str(direction_path.resolve()),
                     "scene_outputs": batch_outputs,
                     "batch": {

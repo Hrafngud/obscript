@@ -113,7 +113,7 @@ Without a phase flag, a run stops after script review. `--storybook` continues t
 
 Each new project has a permanent UUID in `project.json`, printed before processing starts. Resume with `obscript PROJECT_ID --storybook` or `obscript PROJECT_ID --render`; use the same `--output-dir` or `--vault` as the original run. The project keeps its sources, modifiers, target duration, split settings, and shared direction path. Completed imports, analyses, remix/split results, approved scripts, validated storybooks, and unchanged completed renders are reused. Failed runs keep their checkpoints and ID, including projects that only reached transcript import. Split and independent playlist projects resume each child video in the same project. Running the original source again creates a separate project; ID lookup applies to projects created with this metadata.
 
-For manual visual edits, change `storybook.yaml`, the authoritative production plan. Resuming revalidates it without regenerating it, including its exact narration and timing constraints. Invalid edits remain available for correction and block rendering. `storybook.md` is the readable view; edits to that Markdown are preserved as notes but do not change the structured render plan. Readable storybooks and script timestamp cues are refreshed from YAML changes when their Markdown has not been manually edited. Reviewed structured script inputs cannot be changed while reusing their old approval.
+For manual visual edits, change the `**Layout:**` paragraph of a scene in `storybook.md`. Rendering uses that paragraph as the controlling scene direction and resolves its Obsidian asset links into verified selected assets. A `## Shared visual system` section in the Markdown supplies project-wide visual direction. Changes to this Markdown invalidate old render output and rebuild the video. If the Markdown changes during a render, the run stops and preserves those edits for the next attempt. `storybook.yaml` remains editable for detailed structured fields, narration references, and timing; it is revalidated before rendering. Invalid asset paths or storybook structure block rendering with an error, leaving edits available for correction. Readable storybooks and script timestamp cues are refreshed from YAML changes when their Markdown has not been manually edited. Reviewed structured script inputs cannot be changed while reusing their old approval.
 
 After a completed render, use `obscript PROJECT_ID --re-render 005` to re-read scene 005 from `storybook.yaml`, replace only that scene's silent render, and reassemble `video.mp4` from all scene outputs. The scene number must exist, and narration, section, timing, shared direction, and every other scene's storybook entry must remain unchanged. A successful rerender archives any older post-production output as stale. If rendering fails, the previous `video.mp4` and scene media are restored. This option requires an existing project with exactly one video and its editable HyperFrames project; split or playlist projects with multiple videos are ambiguous under a single scene number. It is mutually exclusive with `--storybook`, `--render`, and `--post-production`.
 
@@ -127,7 +127,7 @@ Each stage uses the selected harness's configured default model. Codex uses `med
 
 ## Artifacts
 
-In `storybook.md`, selected library assets appear as Obsidian preview links such as `[docker](file:///{ref-root}/Globals/assets/tech2-icons/svg/docker.svg)`. The structured `storybook.yaml` keeps verified absolute paths for production. If a preview link is entered into the structured plan, validation and HyperFrames production resolve it to the absolute library path.
+In `storybook.md`, library assets appear as Obsidian preview links such as `[docker](file:///{ref-root}/Globals/assets/tech2-icons/svg/docker.svg)`. Adding one to a scene's Layout makes it a selected render asset. The structured `storybook.yaml` keeps verified absolute paths for its own asset selections. Preview links in either file resolve to absolute library paths for production.
 
 Each new run creates a collision-safe project under `/home/zalmo/documents/obsidian/Videos/Videos/<project>/`; ID-based runs reuse that directory:
 
@@ -144,7 +144,7 @@ script.md
 script-readable.md         # timestamp-free script, with --storybook or --render
 review.yaml
 storybook.md              # readable scene plan, with --storybook or --render
-storybook.yaml            # editable production plan, with --storybook or --render
+storybook.yaml            # detailed structured plan, with --storybook or --render
 production/               # only with --render
   hyperframes/            # shared editable composition project
   scenes/scene-001/

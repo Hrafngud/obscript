@@ -15,12 +15,14 @@ from .production import (
     probe_media,
     validate_storybook,
 )
+from .storybook_edits import apply_readable_storybook
 from .storage import (
     creative_direction_reference,
     file_sha256,
     read_creative_direction,
     read_json,
     read_yaml,
+    render_storybook,
     write_json,
     write_yaml,
 )
@@ -84,7 +86,8 @@ Do not claim success until local artifacts exist. Report blockers clearly.
             raise ProductionError("ffprobe is required to verify post-production video")
         script, review = read_json(paths[0]), read_json(paths[1])
         direction = read_creative_direction(direction_path)
-        storybook = resolve_asset_links(read_yaml(paths[3]))
+        snapshot = root / "production/storybook.json"
+        storybook = resolve_asset_links(read_json(snapshot) if snapshot.is_file() else read_yaml(paths[3]))
         if review.get("verdict") != "pass":
             raise ProductionError("Post-production requires an approved script")
         approval = read_json(root / ".obscript/approved-inputs.json")
@@ -98,7 +101,15 @@ Do not claim success until local artifacts exist. Report blockers clearly.
         validate_storybook(script, storybook, target)
         receipt = read_json(root / ".obscript/production-inputs.json")
         expected = {str(path.relative_to(root)) if path.is_relative_to(root) else str(path):
-                    file_sha256(path) for path in paths}
+                    file_sha256(path) for path in [*paths, root / "storybook.md"] if path.is_file()}
+        if "storybook.md" not in receipt.get("inputs", {}) and (root / "storybook.md").is_file():
+            _, _, edited = apply_readable_storybook(
+                storybook, (root / "storybook.md").read_text(encoding="utf-8"),
+                render_storybook(storybook, script),
+            )
+            if edited:
+                raise ProductionError("Readable storybook changed after the original render; run PROJECT_ID --render first")
+            expected.pop("storybook.md")
         production = read_yaml(root / "production.yaml")
         if (production.get("status") != "complete" or receipt.get("inputs") != expected
                 or receipt.get("video_sha256") != file_sha256(root / "video.mp4")):

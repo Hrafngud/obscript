@@ -19,6 +19,7 @@ from obscript.pipeline import Pipeline
 from obscript.projects import resume_spec
 from obscript.production import ProductionAgent, ProductionError, invalidate_downstream, probe_media, validate_storybook
 from obscript.storage import creative_direction_reference, file_sha256, format_timestamp, read_json, render_script, render_storybook, write_json, write_yaml
+from obscript.storybook_edits import apply_readable_storybook
 
 REPO = Path(__file__).resolve().parents[1]
 FOREGROUND_ASSET = "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/SVG/api.svg"
@@ -887,6 +888,11 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(request["operation"], "video")
         expected_story = resolve_asset_links(load_yaml(self.paths["storybook"]) if self.paths["storybook"].suffix == ".yaml"
                                              else read_json(self.paths["storybook"]))
+        readable = self.root / "storybook.md"
+        if readable.is_file():
+            expected_story, _, _ = apply_readable_storybook(
+                expected_story, readable.read_text(), render_storybook(expected_story, read_json(self.paths["script"])),
+            )
         self.assertEqual(request["storybook"]["schema_version"], expected_story["schema_version"])
         self.assertEqual(request["storybook"]["target_duration_seconds"], expected_story["target_duration_seconds"])
         expected_scenes = {scene["id"]: scene for scene in expected_story["scenes"]}
@@ -986,6 +992,31 @@ class ProductionExecutionTests(unittest.TestCase):
         for scene_id, original in other_media.items():
             self.assertEqual((self.root / "production/scenes" / scene_id / "scene.mp4").read_bytes(), original)
 
+    def test_rerender_accepts_readable_scene_edit(self):
+        self._completed_render_for_rerender()
+        story = story_fixture()
+        readable = render_storybook(story, script_fixture())
+        original = story["scenes"][1]["render_brief"]
+        linked_original = original.replace(FOREGROUND_ASSET, "[api](file:///{ref-root}/Globals/assets/ilustrations/SVG/api.svg)").replace(
+            BACKGROUND_ASSET, "[black_mamba](file:///{ref-root}/Globals/assets/background1/black_mamba.png)")
+        before, rest = readable.split("## scene-002 ·", 1)
+        scene_two, after = rest.split("## scene-003 ·", 1)
+        readable = before + "## scene-002 ·" + scene_two.replace(
+            linked_original, linked_original + " Make the node larger."
+        ) + "## scene-003 ·" + after
+        (self.root / "storybook.md").write_text(readable)
+        def inspect(stage, request_path, output_dir):
+            request = read_json(request_path)
+            self.assertEqual([scene["id"] for scene in request["storybook"]["scenes"]], ["scene-002"])
+            self.assertIn("Make the node larger.", request["storybook"]["scenes"][0]["render_brief"])
+            self.execute_fixture(stage, request_path, output_dir)
+        with patch.object(self.agent, "_execute", side_effect=inspect), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.agent.rerender(scene_id="scene-002", script_path=self.paths["script"],
+                                direction_path=self.paths["direction"],
+                                storybook_path=self.paths["storybook"], review_path=self.paths["review"])
+
     def test_rerender_rejects_edits_to_other_scenes(self):
         self._completed_render_for_rerender()
         story = load_yaml(self.paths["storybook"])
@@ -1064,6 +1095,52 @@ class ProductionExecutionTests(unittest.TestCase):
                 patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
                 patch("obscript.production.shutil.which", return_value="ffprobe"):
             self.produce()
+
+    def test_readable_storybook_asset_edits_reach_render_and_invalidate_old_media(self):
+        story = story_fixture()
+        readable = render_storybook(story, script_fixture())
+        original_layout = story["scenes"][0]["render_brief"]
+        edited_layout = f"Animate a request through {DOCKER_LINK} over [black_mamba](file:///{{ref-root}}/Globals/assets/background1/black_mamba.png)."
+        readable = readable.replace(original_layout.replace(FOREGROUND_ASSET, "[api](file:///{ref-root}/Globals/assets/ilustrations/SVG/api.svg)").replace(
+            BACKGROUND_ASSET, "[black_mamba](file:///{ref-root}/Globals/assets/background1/black_mamba.png)"), edited_layout)
+        (self.root / "storybook.md").write_text(readable)
+        seen = []
+        def inspect(stage, request_path, output_dir):
+            request = read_json(request_path)
+            scene = request["storybook"]["scenes"][0]
+            seen.append(scene["render_brief"])
+            self.assertIn(DOCKER_ASSET, scene["render_brief"])
+            self.assertEqual(scene["design_pillars"]["assets"]["selected_assets"][0]["path"], DOCKER_ASSET)
+            self.execute_fixture(stage, request_path, output_dir)
+        with patch.object(self.agent, "_execute", side_effect=inspect), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            self.produce()
+            (self.root / "storybook.md").write_text(readable.replace("Animate a request", "Route a request"))
+            self.produce()
+        self.assertEqual(len(seen), 2)
+        self.assertIn("Route a request", seen[1])
+
+    def test_readable_storybook_rejects_missing_selected_asset(self):
+        story = story_fixture()
+        baseline = render_storybook(story, script_fixture())
+        edited = baseline.replace("[api](file:///{ref-root}/Globals/assets/ilustrations/SVG/api.svg)",
+                                  "[missing](file:///{ref-root}/Globals/assets/missing.svg)", 1)
+        with self.assertRaisesRegex(ContractError, "missing or external asset"):
+            apply_readable_storybook(story, edited, baseline)
+
+    def test_readable_edits_during_render_are_preserved(self):
+        readable = self.root / "storybook.md"
+        readable.write_text(render_storybook(story_fixture(), script_fixture()))
+        def edit_during_render(stage, request_path, output_dir):
+            self.execute_fixture(stage, request_path, output_dir)
+            readable.write_text(readable.read_text() + "\nManual revision during render.\n")
+        with patch.object(self.agent, "_execute", side_effect=edit_during_render), \
+                patch("obscript.production.probe_media", side_effect=self.probe_fixture), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaisesRegex(ProductionError, "edits were preserved"):
+                self.produce()
+        self.assertIn("Manual revision during render.", readable.read_text())
 
     def test_shared_direction_changes_after_planning_block_executor(self):
         reference = self.root / ".obscript/creative-direction-source.json"

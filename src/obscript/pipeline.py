@@ -743,7 +743,8 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
         receipt_path = unit_dir / ".obscript/production-inputs.json"
         inputs = {str(path.relative_to(unit_dir)) if path.is_relative_to(unit_dir) else str(path):
                   file_sha256(path)
-                  for path in [approved.script_path, approved.review_path, direction_path, storybook_path]}
+                  for path in [approved.script_path, approved.review_path, direction_path, storybook_path,
+                               unit_dir / "storybook.md"] if path.is_file()}
         video = unit_dir / "video.mp4"
         if receipt_path.exists() and video.exists() and (unit_dir / "production.yaml").exists():
             receipt = read_json(receipt_path)
