@@ -295,7 +295,13 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         if self.config.verbose:
             print((result.stdout or "") + (result.stderr or ""), flush=True)
         if result.returncode:
-            raise ProductionError(f"Production failed during {stage} (exit {result.returncode}); see {log_path}")
+            # Keep the executor's cause visible instead of hiding it behind the
+            # incomplete scene manifest produced by an interrupted batch.
+            errors = [line.strip()[len("ERROR:"):].strip()
+                      for line in (result.stderr or "").splitlines()
+                      if line.strip().startswith("ERROR:")]
+            detail = f": {errors[-1][:500]}" if errors else ""
+            raise ProductionError(f"Production failed during {stage} (exit {result.returncode}){detail}; see {log_path}")
         if harness:
             try:
                 response = harness.response(result.stdout or "")
@@ -607,7 +613,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                         scene_manifest, duration = self._verify_scene(scene, Path(output["output_directory"]))
                     except ProductionError as exc:
                         if execution_error:
-                            raise ProductionError(f"{exc}; {execution_error}") from exc
+                            raise ProductionError(f"{execution_error}; {exc}") from execution_error
                         raise
                     scene_manifest["actual_duration_seconds"] = duration
                     write_json(scene_manifest_path, scene_manifest)

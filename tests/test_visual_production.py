@@ -1173,6 +1173,25 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertFalse((self.root / "video.mp4").exists())
         self.assertEqual(self.calls, ["produce-video"])
 
+    def test_executor_cause_precedes_incomplete_scene_manifest(self):
+        output = self.root / "production"
+        result = subprocess.CompletedProcess(
+            [], 1, "partial progress", "ERROR: You’ve hit your usage limit. Try again later.\n",
+        )
+        with patch("obscript.production.subprocess.run", return_value=result), \
+                patch("obscript.production.shutil.which", return_value="ffprobe"):
+            with self.assertRaises(ProductionError) as failure:
+                self.produce()
+        message = str(failure.exception)
+        self.assertIn("You’ve hit your usage limit", message)
+        self.assertLess(message.index("usage limit"), message.index("Invalid scene manifest"))
+        self.assertIn("executor.log", message)
+        self.assertEqual((output / "executor.log").read_text(), result.stdout + result.stderr)
+        manifest = load_yaml(self.root / "production.yaml")
+        self.assertIn("usage limit", manifest["error"])
+        self.assertIsNone(manifest["final_video"])
+        self.assertFalse((self.root / "video.mp4").exists())
+
     def test_retry_reuses_verified_completed_scenes(self):
         self.failure = "scene-002"
         with self.assertRaises(ProductionError):
