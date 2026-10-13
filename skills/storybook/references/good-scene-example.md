@@ -1,6 +1,6 @@
 # Good scene example
 
-Use this as a quality bar for completeness and internal agreement, not as a reusable layout, subject, asset set, or animation recipe. A good scene resolves all five pillars around one visible idea, then makes every production field describe that same idea.
+Use this as a quality bar for completeness and internal agreement, not as a reusable layout, subject, asset set, or animation recipe. A good scene resolves all five pillars around one visible idea, then makes every production field describe that same idea. Composition stays qualitative: production resolves geometry and texture scale from the actual assets and inspected frames. The example's state colors must follow the supplied shared palette when used in a real project.
 
 In this example, the narration distinguishes making a database faster from avoiding repeated database work. The visual therefore shows two requests from the same starting point: the first takes the long route to the database and populates the cache; the second visibly terminates at the cache while the database remains inactive.
 
@@ -70,7 +70,7 @@ In this example, the narration distinguishes making a database faster from avoid
     }
   },
   "composition": {
-    "layout": "Use one left-to-right depth path: request origin at 12% width, cache large at 46%, and database smaller and deeper at 82%. Curve the return path above the outbound path so the stored result remains legible without a split screen.",
+    "layout": "Use one left-to-right depth path: the request enters from the left, the cache dominates the foreground, and the database sits farther downstream and deeper in the scene. Keep both nodes visible with enough separation to distinguish the route that reaches the database from the route that stops at the cache. Curve the return path above the outbound path so the stored result remains legible.",
     "focal_element": "The cache changing from empty outline to active stored state, then stopping the second request",
     "supporting_elements": [
       "Two identical blue request tokens launched from the same origin",
@@ -129,10 +129,10 @@ In this example, the narration distinguishes making a database faster from avoid
     },
     {
       "type": "raster background",
-      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png; tile beyond the full frame at its natural pattern scale and darken it for foreground contrast."
+      "description": "/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png; repeat as a fine, visible texture across the full frame and darken it for foreground contrast; resolve tile scale during production."
     }
   ],
-  "render_brief": "Tile /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png beyond the full frame at its natural 192 × 192 pattern scale and darken it so the route remains dominant. Place /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg large at 46% width and /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png smaller and deeper at 82%, with one directed path entering the cache and continuing to the database. At 0.6 seconds, follow a blue request token into the empty cache; flash 'MISS', continue the same token to the database, and return an amber result square along a separate upper arc. At 3.4 seconds, lock a copy of that square inside the cache and brighten its outline. At 4.4 seconds, return the camera to the unchanged request origin and launch an identical blue token. Stop it inside the cache, replace 'MISS' with 'HIT', pulse the short completed route, and keep the database and its branch dormant. Hold both nodes in frame through 8.0 seconds so the viewer reads avoided database work rather than a faster database. End with no transition."
+  "render_brief": "Show two identical requests taking different routes through /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/tech2-icons/svg/lancache.svg, the dominant foreground cache, toward /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/ilustrations/PNG/database.png, the deeper downstream database. Keep both nodes visible and separate the upper return arc from the outbound path. Repeat /home/zalmo/documents/obsidian/Videos/Videos/Globals/assets/background1/black_mamba.png as a fine, visible full-frame texture subdued beneath the route. At the opening, draw the route from left to right to reveal the empty cache and dormant database. From 0.6 to 3.8 seconds, follow a blue request token into the cache; flash 'MISS', continue it to the database, and return an amber result square along the upper arc, storing a copy in the cache. From 4.4 to 6.7 seconds, ease back to the unchanged origin and follow an identical second request only as far as the cache. At 6.0 seconds, replace 'MISS' with 'HIT', brighten the stored square and cache outline, dim the database and its branch, and pulse the short completed route once. Settle in a tighter frame retaining both nodes; from 7.2 seconds through the end, hold the resolved request in the cache with the unused database branch still visible. End with no transition."
 }
 ```
 
@@ -143,5 +143,6 @@ Why this works:
 - **Motion carries the explanation:** the scene changes from miss to stored state to hit. Removing that sequence destroys the meaning.
 - **The abstraction is explicit and stable:** tokens, paths, glow, and route length each have one declared meaning.
 - **The anchor passes the mute test:** the repeated token stopping at the cache is understandable without turning the narration into text.
+- **Composition leaves room for execution:** hierarchy, route separation, and camera focus are settled without arbitrary coordinates, display dimensions, or native tile sizes.
 
 Do not copy the two-pass pipeline when the narration calls for a hierarchy, comparison, state machine, diagnostic inspection, quantitative chart, or another primitive. Copy the discipline: one claim, verified assets with semantic jobs, one evolving mechanism, one stable visual mapping, and one dominant visible takeaway.

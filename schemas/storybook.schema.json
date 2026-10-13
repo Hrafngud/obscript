@@ -264,7 +264,8 @@
             "properties": {
               "layout": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Qualitative framing, hierarchy, containment, depth, and spatial relationships. Leave implementation geometry to production; include measurements only when explicitly required by the user or shared standards, or meaningful to the subject."
               },
               "focal_element": {
                 "type": "string",
@@ -387,7 +388,7 @@
           "render_brief": {
             "type": "string",
             "minLength": 1,
-            "description": "Self-contained English paragraph displayed as the readable scene's Layout: imperative directions for concrete elements, supplied asset paths or named asset requirements, positions, exact on-screen labels in their intended language, background, scene-local motion timing, camera behavior, and transition. Describe visible actions without re-explaining narration; agree with all structured scene fields."
+            "description": "Self-contained English paragraph displayed as the readable scene's Layout: imperative directions for concrete elements, supplied asset paths or named asset requirements, hierarchy and qualitative spatial relationships, exact on-screen labels in their intended language, background treatment, explanatory action timing, camera focus, and transition. Leave implementation measurements to production unless explicitly required or meaningful to the subject. Apply shared styling without repeating its specification. Describe visible actions without re-explaining narration; agree with all structured scene fields."
           }
         }
       },

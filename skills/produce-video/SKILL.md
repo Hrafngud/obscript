@@ -15,6 +15,8 @@ creative_direction is the verbatim shared Markdown, and creative_direction_sourc
 
 Every scene's `design_pillars` is a binding execution contract, not planning commentary. Preserve the context claim and accuracy guardrail; use each selected asset for its stated semantic role; implement the explanatory change and attention path; keep the abstraction's visual mapping stable; and make the attention anchor convey the declared `mute_read` without relying on narration or prose. If production cannot realize all five together, fail the scene clearly instead of dropping a pillar or replacing the scene with a text-led slide.
 
+Implement the storybook's qualitative composition using the actual assets and content. Choose dimensions, coordinates, spacing, typography sizes, border widths, texture scale, and motion distances during authoring, then refine them through frame inspection for legibility, hierarchy, and continuity. Preserve explicitly required measurements, shared standards, scene boundaries, and explanatory action cues. Resolving these implementation values is part of production and does not require new scene planning.
+
 ## HyperFrames handoff
 
 Explicitly invoke the installed $hyperframes entry point and read its instructions, then load hyperframes-core before authoring HTML and hyperframes-cli for initialization, checks, and rendering. Use hyperframes-animation for motion and transitions; consult hyperframes-registry before hand-building a named effect. If the required capabilities are unavailable, fail clearly.

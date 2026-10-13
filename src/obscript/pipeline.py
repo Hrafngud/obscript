@@ -688,14 +688,15 @@ Return findings only; do not rewrite the script.""",
 shared creative direction {direction_path}, and plan {approved.plan_path}.
 The shared Markdown is the single source of truth for visual standards. Honor every filled field.
 Blank fields and template suggestions are unspecified, not instructions to invent a new identity.
-Resolve unspecified execution details only in scene specifications. Never create or edit a creative-direction file.
+Resolve each scene's visual intent and explanatory sequence; leave implementation measurements to production. Never create or edit a creative-direction file.
 Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
 {scene_instruction}
 Cover every narration word exactly once in original section order, as contiguous exact excerpts.
 No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
 Production is silent animations only. Narration excerpts are timing references for a human reader.
 Write scene and production directions in English; preserve narration verbatim and keep on-screen labels in the script's language unless shared direction specifies otherwise.
-Describe visible elements, positions, asset references, backgrounds, and timed motion, without re-explaining the narration.
+Describe visible elements, hierarchy, qualitative spatial relationships, asset references, backgrounds, and timed explanatory motion, without re-explaining the narration.
+Do not invent pixel sizes, bounding boxes, coordinates, percentage positions, numeric margins, font sizes, border widths, tile dimensions, motion distances, rotation angles, or zoom percentages in any scene field. Production resolves geometry from the actual assets, content, and inspected frames. Retain measurements explicitly required by the user or filled shared standards, meaningful subject quantities, scene boundaries, and useful action timestamps. Do not repeat global styling specifications in each render_brief or lock texture scale to native asset dimensions.
 Resolve all five non-negotiable design pillars together in every scene and record them in design_pillars: context accuracy, scene-specific asset search, explanatory animation, a semantic visual abstraction from the visual-language map, and one mute-readable attention anchor. A scene is incomplete if any pillar is missing or merely promised for production.
 For every scene, perform a text search of the local asset library using terms derived from that scene's concrete subject, action, setting, and named technology. Record the actual queries and verified candidate paths. Use at least one context-relevant foreground library asset in at least ceil(4 * total scene count / 5) scenes; the few exceptions require a concrete reason after an unsuccessful search. Backgrounds do not satisfy foreground coverage.
 Build each scene around one evolving visual explanation: a focused real technical action, schematic, infographic, environment, transformation, or accurate visual analogy. Show mechanisms and cause-and-effect instead of printing definitions or narration in containers.
