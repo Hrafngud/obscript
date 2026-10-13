@@ -270,9 +270,10 @@ Do not claim success until requested local artifacts exist. Report errors clearl
         harness = None
         if self.config.harness == "opencode":
             harness = OpenCodeHarness(self.config.agent_executable, self.config.repo_root, self.config.model)
-            command = harness.command(output_dir)
+            command = harness.command()
+            execution_options["cwd"] = output_dir
             try:
-                execution_options["env"] = harness.environment(output_dir=output_dir)
+                execution_options["env"] = harness.environment(directory=output_dir, output_dir=output_dir)
             except AgentError as exc:
                 raise ProductionError(str(exc)) from exc
         else:
@@ -300,7 +301,9 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             errors = [line.strip()[len("ERROR:"):].strip()
                       for line in (result.stderr or "").splitlines()
                       if line.strip().startswith("ERROR:")]
-            detail = f": {errors[-1][:500]}" if errors else ""
+            error = harness.error_detail(result.stdout or "") if harness else None
+            error = error or (errors[-1] if errors else None)
+            detail = f": {error[:500]}" if error else ""
             raise ProductionError(f"Production failed during {stage} (exit {result.returncode}){detail}; see {log_path}")
         if harness:
             try:
@@ -611,9 +614,12 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                     scene_manifest_path = Path(output["manifest"])
                     try:
                         scene_manifest, duration = self._verify_scene(scene, Path(output["output_directory"]))
-                    except ProductionError as exc:
+                    except ProductionError:
                         if execution_error:
-                            raise ProductionError(f"{execution_error}; {exc}") from execution_error
+                            # A failed executor can leave our pending manifest
+                            # untouched. Report its cause instead of treating
+                            # an unfinished scene as a second contract failure.
+                            raise execution_error
                         raise
                     scene_manifest["actual_duration_seconds"] = duration
                     write_json(scene_manifest_path, scene_manifest)

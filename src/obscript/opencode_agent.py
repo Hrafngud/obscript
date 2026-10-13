@@ -19,14 +19,19 @@ class OpenCodeHarness:
         self.repo_root = repo_root
         self.model = model
 
-    def command(self, directory: Path) -> list[str]:
-        command = [str(self.executable), "run", "--format", "json", "--dir", str(directory)]
+    def command(self) -> list[str]:
+        # V2 uses the process directory. Its private server must inherit this
+        # stage's inline skills and permissions instead of a service's old env.
+        command = [str(self.executable), "run", "--format", "json", "--standalone"]
         if self.model:
             command.extend(["--model", self.model])
         return command
 
-    def environment(self, *, output_dir: Path | None = None) -> dict[str, str]:
+    def environment(self, *, directory: Path | None = None, output_dir: Path | None = None) -> dict[str, str]:
         env = os.environ.copy()
+        # OpenCode resolves its location from PWD before falling back to cwd.
+        if directory is not None:
+            env["PWD"] = str(directory.resolve())
         try:
             config = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
         except json.JSONDecodeError as exc:
@@ -63,6 +68,30 @@ class OpenCodeHarness:
         return env
 
     @staticmethod
+    def error_detail(stdout: str) -> str | None:
+        """Extract a provider failure without including raw response bodies."""
+        detail = None
+        for line in stdout.splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict) or event.get("type") != "error":
+                continue
+            error = event.get("error")
+            if not isinstance(error, dict):
+                detail = str(error or "Unknown OpenCode error")
+                continue
+            data = error.get("data")
+            data = data if isinstance(data, dict) else {}
+            message = error.get("message") or data.get("message") or "Unknown OpenCode error"
+            kind = error.get("type") or error.get("name")
+            status = error.get("status") or data.get("statusCode")
+            prefix = " ".join(str(value) for value in [kind, f"(HTTP {status})" if status else None] if value)
+            detail = f"{prefix}: {message}" if prefix else str(message)
+        return detail
+
+    @staticmethod
     def response(stdout: str) -> str:
         messages: dict[str, dict[str, str]] = {}
         for line in stdout.splitlines():
@@ -75,8 +104,7 @@ class OpenCodeHarness:
             if not isinstance(event, dict):
                 raise AgentError("OpenCode returned a non-object event")
             if event.get("type") == "error":
-                error = event.get("error", {})
-                raise AgentError(f"OpenCode reported an error: {json.dumps(error, ensure_ascii=False)}")
+                raise AgentError(f"OpenCode reported an error: {OpenCodeHarness.error_detail(line)}")
             if event.get("type") != "text":
                 continue
             part = event.get("part", {})
@@ -101,8 +129,9 @@ class OpenCodeAgent(StructuredAgent):
         log_path = output_path.with_suffix(".executor.log")
         print(f"[obscript] opencode → {stage}", flush=True)
         try:
-            result = subprocess.run(harness.command(self.project_root), input=prompt, text=True,
-                                    capture_output=True, check=False, env=harness.environment())
+            result = subprocess.run(harness.command(), cwd=self.project_root, input=prompt, text=True,
+                                    capture_output=True, check=False,
+                                    env=harness.environment(directory=self.project_root))
         except OSError as exc:
             raise AgentError(f"OpenCode executor could not start: {exc}") from exc
         log = (result.stdout or "") + (result.stderr or "")
@@ -110,7 +139,9 @@ class OpenCodeAgent(StructuredAgent):
         if self.verbose:
             print(log, flush=True)
         if result.returncode:
-            raise AgentError(f"OpenCode failed during {stage} (exit {result.returncode}); see {log_path}")
+            error = harness.error_detail(result.stdout or "")
+            detail = f": {error[:500]}" if error else ""
+            raise AgentError(f"OpenCode failed during {stage} (exit {result.returncode}){detail}; see {log_path}")
         try:
             response = harness.response(result.stdout or "")
             output_path.with_suffix(".response.txt").write_text(response, encoding="utf-8")

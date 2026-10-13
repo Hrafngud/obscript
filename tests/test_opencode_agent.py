@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from dataclasses import replace
@@ -57,7 +58,10 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertEqual(read_json(output), value)
         command = call.args[0]
         self.assertEqual(command[:4], ['opencode', 'run', '--format', 'json'])
-        self.assertEqual(command[command.index('--dir') + 1], str(self.root))
+        self.assertEqual(call.kwargs['cwd'], self.root)
+        self.assertEqual(call.kwargs['env']['PWD'], str(self.root.resolve()))
+        self.assertIn('--standalone', command)
+        self.assertNotIn('--dir', command)
         for flag in ['--model', '--variant', '--agent', '--sandbox', '--output-schema']:
             self.assertNotIn(flag, command)
         self.assertIn('All natural-language fields must be written in Brazilian Portuguese', call.kwargs['input'])
@@ -125,6 +129,14 @@ class OpenCodeAgentTests(unittest.TestCase):
         self.assertEqual(command[command.index('--model') + 1], 'provider/model')
         self.assertNotIn('--variant', command)
 
+    def test_nonzero_exit_preserves_provider_auth_error(self):
+        stream = json.dumps({'type': 'error', 'error': {
+            'type': 'provider.auth', 'message': 'User not found.', 'status': 401,
+            'response': {'body': 'raw provider response'},
+        }})
+        with self.assertRaisesRegex(AgentError, r'provider.auth \(HTTP 401\): User not found\.'):
+            self.run_agent(stream, returncode=1)
+
     def test_shared_counter_allows_switching_harnesses(self):
         self.run_agent(text_event(json.dumps(script_fixture())))
         other = OpenCodeAgent(executable=Path('opencode'), repo_root=REPO,
@@ -133,6 +145,63 @@ class OpenCodeAgentTests(unittest.TestCase):
 
 
 class OpenCodeExecutionTests(unittest.TestCase):
+    def test_error_detail_supports_v1_v2_and_stderr_fallback(self):
+        cases = [
+            ('not JSON\n', None),
+            (text_event('Progress'), None),
+            (json.dumps({'type': 'error', 'error': 'failed'}), 'failed'),
+            (json.dumps({'type': 'error', 'error': {'name': 'APIError',
+                        'data': {'message': 'Provider failed', 'statusCode': 503}}}),
+             'APIError (HTTP 503): Provider failed'),
+            (json.dumps({'type': 'error', 'error': {'type': 'provider.auth',
+                        'message': 'User not found.', 'status': 401, 'response': {'body': 'omit'}}}),
+             'provider.auth (HTTP 401): User not found.'),
+        ]
+        for stream, expected in cases:
+            with self.subTest(stream=stream):
+                self.assertEqual(OpenCodeHarness.error_detail(stream), expected)
+
+    def test_subprocess_handoff_without_running_opencode(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            executable = root / 'fake-opencode'
+            executable.write_text(
+                f'#!{sys.executable}\n'
+                'import json, os, sys\n'
+                "assert sys.argv[1:] == ['run', '--format', 'json', '--standalone']\n"
+                "assert os.environ['PWD'] == os.getcwd()\n"
+                "config = json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])\n"
+                "assert config['skills']['paths']\n"
+                'prompt = sys.stdin.read()\n'
+                "assert 'SKILL.md' in prompt\n"
+                "if 'Output JSON Schema:' in prompt:\n"
+                "    assert config['permission']['*'] == 'deny'\n"
+                f'    response = {json.dumps(script_fixture())!r}\n'
+                'else:\n'
+                "    assert config['permission']['bash'] == 'allow'\n"
+                "    assert config['permission']['task'] == 'deny'\n"
+                "    assert config['permission']['edit'][os.getcwd() + '/**'] == 'allow'\n"
+                "    response = 'Completed silent rendering.'\n"
+                "print(json.dumps({'type': 'text', 'part': {'id': 'part-1', 'messageID': 'message-1', 'text': response}}))\n",
+                encoding='utf-8',
+            )
+            executable.chmod(0o755)
+            config = replace(config_fixture(root), harness='opencode', opencode=executable)
+            # Force an inherited PWD that differs from every executor directory.
+            with patch.dict(os.environ, {'PWD': '/stale-parent-directory', 'OPENCODE_CONFIG_CONTENT': '{}'}):
+                agent = OpenCodeAgent(executable=executable, repo_root=REPO, project_root=root,
+                                      model=None, reasoning_effort='medium', verbose=False)
+                value, _ = agent.run(stage='write-script', skill='write-script', schema='script', prompt='Write.')
+                self.assertEqual(value, script_fixture())
+                for adapter, stage in [(ProductionAgent, 'produce-video-01-of-04'),
+                                       (PostProductionAgent, 'post-production')]:
+                    output = root / stage
+                    output.mkdir()
+                    adapter(config, root)._execute(stage, root / 'request.json', output)
+                    response = output / ('agent-response.txt' if stage == 'post-production'
+                                         else f'{stage}.agent-response.txt')
+                    self.assertEqual(response.read_text(), 'Completed silent rendering.\n')
+
     def test_render_and_post_production_use_the_same_native_adapter(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             root = Path(directory)
@@ -149,7 +218,10 @@ class OpenCodeExecutionTests(unittest.TestCase):
                     call = run.call_args
                     command = call.args[0]
                     self.assertEqual(command[0], '/custom/opencode')
-                    self.assertEqual(command[command.index('--dir') + 1], str(output))
+                    self.assertEqual(call.kwargs['cwd'], output)
+                    self.assertEqual(call.kwargs['env']['PWD'], str(output.resolve()))
+                    self.assertIn('--standalone', command)
+                    self.assertNotIn('--dir', command)
                     self.assertNotIn('--variant', command)
                     self.assertNotIn('--model', command)
                     permission = json.loads(call.kwargs['env']['OPENCODE_CONFIG_CONTENT'])['permission']
