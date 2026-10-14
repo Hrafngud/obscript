@@ -47,7 +47,19 @@ obscript new --dry-run
 
 `new` creates a collision-safe project folder containing `script.md`, `project.json`, and `run.yaml`. Open `script.md` in Obsidian or your editor and replace the thesis and narration placeholders. The template uses the existing PT-BR Markdown front matter and includes hook, introduction, development, and conclusion sections. Its defaults are title `Novo roteiro`, format `topics`, and a 10-minute target; `--project` supplies the title when no positional title is given. `--format` accepts `source`, `topics`, or `essay` for this command.
 
-Original projects receive a permanent UUID, timestamps, shared creative-direction path, and `origin: original` / `status: draft` metadata. Their source list is empty. Creation needs neither ytstt nor Codex, does not create a transcripts directory, and does not require the shared creative-direction file to exist. These are manual drafts: `new` does not generate or review narration, and ID-based storybook/render processing is not supported for these projects. `--storybook`, `--render`, `--re-render`, and `--into` are rejected with `new`. A dry run creates no files.
+Original projects receive a permanent UUID, timestamps, shared creative-direction path, and `origin: original` / `status: draft` metadata. Their source list is empty. Creation needs neither ytstt nor Codex, does not create a transcripts directory, and does not require the shared creative-direction file to exist. `new` creates the draft only; phase flags and `--into` are rejected with `new`. A dry run creates no files.
+
+After writing the draft, use its printed project ID with the same commands as a transcript project:
+
+```bash
+obscript PROJECT_ID                   # import and review your narration
+obscript PROJECT_ID --storybook       # review, then plan the visuals
+obscript PROJECT_ID --render          # review, plan, then render
+```
+
+The original import preserves your narration and section order, deriving structured knowledge and a plan from the draft without transcription or automatic rewriting. Use a `#` title and at least three nonempty `##` sections; replace all template placeholders. Frontmatter supplies the format and positive `target_duration_seconds`, falling back to saved project settings when omitted. An optional `fontes.md` supplies supporting references for review; the imported knowledge is author context, not independent factual evidence. A rejected review leaves the narration for you to edit and exits with status 2. Successful checkpoints are reused on subsequent runs with either harness.
+
+Both workflows produce the same files: storybook planning puts section and scene timestamps in `script.md`, and `script-readable.md` contains plain narration without timings. For original projects, edit either view and rerun your project ID to review the changes and rebuild downstream artifacts. Generated timing cues are excluded from narration on import. Conflicting edits to both views must be synchronized before proceeding. Changes to narration, format, target duration, or `fontes.md` invalidate approval, storybook, render, and post-production output. Re-rendering a scene or polishing requires a current reviewed render; use `--render` first after author edits.
 
 For processing existing sources, the positional grammar is:
 

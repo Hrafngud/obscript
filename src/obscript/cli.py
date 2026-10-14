@@ -199,14 +199,16 @@ def _print_dry_run(spec, project_root: Path | None = None) -> None:
         print("pipeline: validate-production → post-production → verify-post-production")
         print("requires a completed render; preserves the original video and upstream inputs")
         return
-    stages = ["ytstt/source import", "analyze-source"]
-    if spec.pipeline != "single":
+    original = bool(project_root and read_json(project_root / "project.json").get("origin") == "original")
+    stages = ["import-original-script", "review-script"] if original else ["ytstt/source import", "analyze-source"]
+    if not original and spec.pipeline != "single":
         stages.append(spec.pipeline)
-    if spec.time_controller != "normal":
+    if not original and spec.time_controller != "normal":
         stages.append(spec.time_controller)
-    if spec.format != "source":
+    if not original and spec.format != "source":
         stages.append(spec.format)
-    stages.extend(["plan-script", "write-script", "review-script"])
+    if not original:
+        stages.extend(["plan-script", "write-script", "review-script"])
     if spec.storybook or spec.render:
         stages.extend(["storybook", "validate-storybook"])
     if spec.render:
@@ -332,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             codex = _resolve_codex(args.codex)
         args.output_dir.expanduser().mkdir(parents=True, exist_ok=True)
-        args.transcripts_dir.expanduser().mkdir(parents=True, exist_ok=True)
+        if spec.sources:
+            args.transcripts_dir.expanduser().mkdir(parents=True, exist_ok=True)
         config = RuntimeConfig(
             repo_root=repo_root,
             output_dir=args.output_dir.expanduser().resolve(),

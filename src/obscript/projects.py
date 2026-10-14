@@ -93,9 +93,6 @@ def resume_spec(root: Path, *, storybook: bool, render: bool, post_production: b
                 storybook_scene_count: int | None = None,
                 rerender_scene_id: str | None = None) -> CommandSpec:
     metadata = read_json(root / "project.json")
-    if metadata.get("origin") == "original":
-        raise ContractError(f"Original projects are manual drafts; edit {root / 'script.md'}. "
-                            "They do not have reviewed structured checkpoints for storybook or rendering.")
     command = dict(metadata["command"])
     command["sources"] = tuple(command["sources"])
     return replace(CommandSpec(**command), storybook=storybook, render=render,

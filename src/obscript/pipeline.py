@@ -12,6 +12,7 @@ from .agent import StructuredAgent
 from .opencode_agent import OpenCodeAgent
 from .contracts import ContractError, choose_target_duration, script_duration_bounds
 from .models import CommandSpec, RuntimeConfig
+from .original import import_original_script, original_context
 from .projects import create_project, find_project, update_project
 from .production import STORYBOOK_SCHEMA_VERSION, ProductionAgent, invalidate_downstream, validate_storybook
 from .post_production import PostProductionAgent
@@ -93,10 +94,21 @@ class Pipeline:
         return result
 
     def _run(self, spec: CommandSpec, project_root: Path) -> PipelineResult:
+        original = read_json(project_root / "project.json").get("origin") == "original"
+        if original and (spec.rerender_scene_id or spec.post_production):
+            self._validate_original_checkpoint(project_root, spec)
         if spec.rerender_scene_id:
-            return self._run_re_render(project_root, spec.rerender_scene_id)
+            result = self._run_re_render(project_root, spec.rerender_scene_id)
+            if original:
+                self._validate_original_checkpoint(project_root, spec)
+            return result
         if spec.post_production:
-            return self._run_post_production(project_root)
+            result = self._run_post_production(project_root)
+            if original:
+                self._validate_original_checkpoint(project_root, spec)
+            return result
+        if original:
+            return self._run_original(spec, project_root)
         direction_path = self.config.creative_direction_path
         direction = read_creative_direction(direction_path) if spec.storybook or spec.render else None
         sources = self._import_sources(spec, project_root)
@@ -266,6 +278,79 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                     outputs.append(unit_dir / "production.yaml")
                     update_project(project_root, phase="render", unit=unit_dir)
         return PipelineResult(project_root, tuple(outputs), all_passed)
+
+    def _validate_original_checkpoint(self, root: Path, spec: CommandSpec) -> None:
+        _, inputs = import_original_script(root, spec)
+        checkpoint = root / ".obscript/original-inputs.json"
+        if not checkpoint.is_file() or read_json(checkpoint) != inputs:
+            raise ContractError("Original narration or fontes.md changed; run PROJECT_ID --storybook or --render to review it first")
+        knowledge = read_json(root / ".obscript/knowledge.json")
+        receipt = root / ".obscript/approved-inputs.json"
+        if not receipt.is_file() or read_json(receipt) != self._approval_inputs(root, knowledge):
+            raise ContractError("Approved script inputs changed; restore the approved checkpoint before resuming")
+
+    def _run_original(self, spec: CommandSpec, root: Path) -> PipelineResult:
+        script, inputs = import_original_script(root, spec)
+        state = root / ".obscript"
+        checkpoint = state / "original-inputs.json"
+        agent = self._agent(root)
+        direction_path = self.config.creative_direction_path
+        direction = read_creative_direction(direction_path) if spec.storybook or spec.render else None
+        target = script["metadata"]["target_duration_seconds"]
+        write_yaml(root / "run.yaml", {
+            "project_id": spec.project_id, "origin": "original",
+            **script["metadata"], "sources": [], "storybook": spec.storybook, "render": spec.render,
+            "storybook_scene_count": spec.storybook_scene_count,
+            "creative_direction": creative_direction_reference(direction_path, direction) if direction else None,
+            "agent": self.config.agent_name, "model": self.config.model or "configured default",
+        })
+        if checkpoint.is_file() and read_json(checkpoint) == inputs:
+            self._validate_original_checkpoint(root, spec)
+            script = read_json(state / "approved-script.json")
+        else:
+            # Capture edits from either view before archiving the old derived documents.
+            draft = (root / "script.md").read_text(encoding="utf-8")
+            invalidate_downstream(root, "script")
+            state.mkdir(parents=True, exist_ok=True)
+            (state / "original-source.md").write_text(draft, encoding="utf-8")
+            (root / "script.md").write_text(render_script(script), encoding="utf-8")
+            knowledge, plan = original_context(script, root)
+            write_json(state / "knowledge.json", knowledge)
+            write_json(state / "plan.json", plan)
+            write_json(state / "original-script.json", script)
+            write_yaml(root / "knowledge.yaml", knowledge)
+            (root / "plan.md").write_text(render_plan(plan), encoding="utf-8")
+            update_project(root, phase="script", unit=root)
+            review_spec = CommandSpec(**{**script["metadata"], "sources": ()})
+            review, _ = self._review(agent, review_spec, state / "knowledge.json", state / "plan.json",
+                                     state / "original-script.json", target, original=True)
+            if import_original_script(root, spec)[1] != inputs:
+                raise ContractError("Original narration or fontes.md changed during review; your edits were preserved. Rerun to review them")
+            write_yaml(root / "review.yaml", review)
+            if review["verdict"] != "pass":
+                print(f"[obscript] revise seu roteiro em {root / 'script.md'} usando {root / 'review.yaml'}", flush=True)
+                return PipelineResult(root, (root / "script.md", root / "review.yaml"), False)
+            write_json(state / "approved-script.json", script)
+            write_json(state / "review.json", review)
+            write_json(checkpoint, inputs)
+            write_json(state / "approved-inputs.json", self._approval_inputs(root, knowledge))
+        approved = ApprovedScript(script, state / "approved-script.json", state / "knowledge.json",
+                                  state / "plan.json", state / "review.json", target)
+        update_project(root, phase="script", unit=root)
+        outputs = [root / "script.md", root / "review.yaml"]
+        if spec.storybook or spec.render:
+            if read_creative_direction(direction_path) != direction:
+                raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
+            _, storybook_path = self._get_storybook(agent, root, approved, direction_path,
+                                                   render=spec.render, scene_count=spec.storybook_scene_count)
+            self._validate_original_checkpoint(root, spec)
+            update_project(root, phase="storybook", unit=root)
+            outputs.extend([root / "script-readable.md", root / "storybook.md", storybook_path])
+            if spec.render:
+                outputs.extend([self._produce_video(root, approved, direction_path, storybook_path), root / "production.yaml"])
+                self._validate_original_checkpoint(root, spec)
+                update_project(root, phase="render", unit=root)
+        return PipelineResult(root, tuple(outputs), True)
 
     def _run_re_render(self, project_root: Path, scene_id: str) -> PipelineResult:
         metadata = read_json(project_root / "project.json")
@@ -449,8 +534,17 @@ Preserve useful nuance through developed examples, contrasts, caveats, and impli
         plan_path: Path,
         script_path: Path,
         target_seconds: int,
+        *, original: bool = False,
     ) -> tuple[dict, Path]:
         minimum_seconds, maximum_seconds = script_duration_bounds(target_seconds)
+        original_guidance = (
+            f"This is a manually authored original script. The knowledge and plan are imported context, not independent factual evidence. "
+            f"Read {script_path.parent.parent / 'fontes.md'} for supporting references if it exists. "
+            "Assess factual plausibility, internal consistency, clarity, format, and duration. Do not assume that "
+            "a claim is verified just because it also appears in the derived knowledge. Do not reject original "
+            "examples merely because there is no source transcript. Report actionable issues for the author; never rewrite narration."
+            if original else ""
+        )
         return agent.run(
             stage="review-script",
             skill="review-script",
@@ -461,7 +555,7 @@ Duration tolerance: ±30% of the expected duration. Estimates from {minimum_seco
 inclusive are on_target and must not cause a duration issue or a revise verdict.
 Evaluate speaking pace naturally, not by forcing narration into the exact target or individual planned section times.
 Keep other quality checks, including preservation of useful nuance, explanatory mental models, authored cadence, and a non-flat emotional and intellectual progression. Minor optional improvements alone do not require revision.
-Return findings only; do not rewrite the script.""",
+Return findings only; do not rewrite the script. {original_guidance}""",
         )
 
     def _produce_script(
@@ -591,12 +685,16 @@ Return findings only; do not rewrite the script.""",
         return None
 
     def _approval_inputs(self, unit_dir: Path, pipeline_knowledge: dict) -> dict:
-        return {
+        result = {
             "files": {name: file_sha256(unit_dir / ".obscript" / name)
                       for name in ["approved-script.json", "knowledge.json", "plan.json", "review.json"]},
             "pipeline_knowledge": hashlib.sha256(json.dumps(pipeline_knowledge, sort_keys=True,
                                                             ensure_ascii=False).encode()).hexdigest(),
         }
+        original = unit_dir / ".obscript/original-inputs.json"
+        if original.is_file():
+            result["original_inputs"] = read_json(original)
+        return result
 
     def _get_storybook(
         self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
@@ -668,6 +766,9 @@ Return findings only; do not rewrite the script.""",
         direction_path: Path, *, scene_count: int | None = None,
     ) -> tuple[dict, Path]:
         invalidate_downstream(unit_dir, "storybook")
+        original = (unit_dir / ".obscript/original-inputs.json").is_file()
+        if original:
+            self._validate_original_checkpoint(unit_dir, CommandSpec(**approved.script["metadata"], sources=()))
         (unit_dir / "script.md").write_text(render_script(approved.script), encoding="utf-8")
         feedback = ""
         direction = read_creative_direction(direction_path)
@@ -723,6 +824,8 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                     raise ContractError(f"Storybook remained invalid after 3 attempts: {exc}; inspect {unit_dir / 'storybook.md'}") from exc
                 continue
             path = unit_dir / ".obscript/storybook.json"
+            if original:
+                self._validate_original_checkpoint(unit_dir, CommandSpec(**approved.script["metadata"], sources=()))
             if read_creative_direction(direction_path) != direction:
                 raise ContractError("Shared creative direction changed during storybook planning; rerun to rebuild the scene plan")
             write_json(unit_dir / ".obscript/creative-direction-source.json", creative_direction_reference(direction_path, direction))

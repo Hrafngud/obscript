@@ -82,16 +82,17 @@ class NewProjectTests(unittest.TestCase):
                     self.assertEqual(main(["new", "--vault", str(vault), *flags]), 1)
                 self.assertFalse(vault.exists())
 
-    def test_original_project_resume_reports_manual_draft_without_import(self) -> None:
+    def test_original_project_resume_dry_run_skips_source_processing(self) -> None:
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["new", "--vault", directory]), 0)
             root = Path(directory) / "novo-roteiro"
             project_id = read_json(root / "project.json")["id"]
-            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stderr(io.StringIO()) as error:
-                self.assertEqual(main([project_id, "--storybook", "--vault", directory]), 1)
+            with patch("obscript.cli.Pipeline") as pipeline, contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main([project_id, "--storybook", "--vault", directory, "--dry-run"]), 0)
                 pipeline.assert_not_called()
-            self.assertIn("manual drafts", error.getvalue())
-            self.assertIn(str(root / "script.md"), error.getvalue())
+            self.assertIn("import-original-script → review-script → storybook", output.getvalue())
+            self.assertNotIn("ytstt", output.getvalue())
+            self.assertNotIn("write-script", output.getvalue())
             self.assertEqual(read_json(root / "project.json")["status"], "draft")
 
 

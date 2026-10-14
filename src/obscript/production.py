@@ -181,7 +181,7 @@ def invalidate_downstream(unit_dir: Path, changed: str) -> None:
         paths.extend(["storybook.md", "storybook.yaml", ".obscript/storybook.json"])
     if changed == "script":
         paths.append(".obscript/approved-inputs.json")
-        paths.extend(["script-readable.md", "creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])
+        paths.extend(["script-readable.md", ".obscript/original-inputs.json", "creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])
     existing = [unit_dir / name for name in paths if (unit_dir / name).exists()]
     if not existing:
         return
