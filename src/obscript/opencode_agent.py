@@ -122,14 +122,18 @@ class OpenCodeHarness:
 
 
 class OpenCodeAgent(StructuredAgent):
-    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path) -> None:
+    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path,
+                 image_paths: tuple[Path, ...] = ()) -> None:
         harness = OpenCodeHarness(self.executable, self.repo_root, self.model)
         schema = read_json(schema_path)
         prompt += "\nOutput JSON Schema:\n" + json.dumps(schema, ensure_ascii=False)
         log_path = output_path.with_suffix(".executor.log")
         print(f"[obscript] opencode → {stage}", flush=True)
+        command = harness.command()
+        for path in image_paths:
+            command.extend(["--file", str(path)])
         try:
-            result = subprocess.run(harness.command(), cwd=self.project_root, input=prompt, text=True,
+            result = subprocess.run(command, cwd=self.project_root, input=prompt, text=True,
                                     capture_output=True, check=False,
                                     env=harness.environment(directory=self.project_root))
         except OSError as exc:

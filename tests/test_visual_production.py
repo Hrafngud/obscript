@@ -731,7 +731,7 @@ class PipelineVisualTests(unittest.TestCase):
         result = self.run_pipeline()
         self.assertTrue(result.passed_review)
         self.assertEqual([path.name for path in result.outputs],
-                         ["script.md", "script-readable.md", "storybook.md", "storybook.yaml"])
+                         ["script.md", "reference.json", "visual-references.yaml", "script-readable.md", "storybook.md", "storybook.yaml"])
         self.assertNotIn("creative-direction", [stage for stage, _ in FakePlanningAgent.calls])
         self.assertFalse((result.project_root / "creative-direction.md").exists())
         self.assertFalse((result.project_root / ".obscript/creative-direction.json").exists())
@@ -749,6 +749,44 @@ class PipelineVisualTests(unittest.TestCase):
         readable_text = (result.project_root / "script-readable.md").read_text()
         self.assertEqual(readable_text, render_script(script_fixture()))
         self.assertNotIn("00:00:", readable_text)
+
+    def test_visual_references_follow_review_and_reach_storybook_for_split_and_playlist(self):
+        def extract(source_dir, config, agent):
+            self.assertIn("review-script", [stage for stage, _ in FakePlanningAgent.calls])
+            path = source_dir / "visual-references/reference.json"
+            write_json(path, {"source": read_json(source_dir / "source.json"), "fingerprint": "fixture",
+                             "status": "complete", "errors": [], "segments": [],
+                             "consolidated_brief": "Observed visual hierarchy."})
+            return path
+        for tokens, assets, expected_count in [(["split", "source"], [self.asset], 1),
+                                               (["source"], [self.asset, self.asset], 2),
+                                               (["remix", "a,b"], [self.asset], 2)]:
+            with self.subTest(tokens=tokens):
+                self.ingest.return_value = assets
+                FakePlanningAgent.calls.clear()
+                FakePlanningAgent.prompts.clear()
+                with patch("obscript.pipeline.ensure_source_references", side_effect=extract) as extraction:
+                    result = self.run_pipeline(tokens)
+                self.assertEqual(extraction.call_count, expected_count)
+                collections = list(result.project_root.rglob("visual-references.yaml"))
+                self.assertTrue(collections)
+                for collection in collections:
+                    references = load_yaml(collection)
+                    self.assertIn("Observed visual hierarchy", references["consolidated_brief"])
+                    self.assertEqual(len(references["sources"]), 2 if tokens[0] == "remix" else 1)
+                prompts = [prompt for stage, prompt in FakePlanningAgent.prompts if stage == "storybook-01"]
+                self.assertTrue(all("visual-references.yaml" in prompt for prompt in prompts))
+
+    def test_changed_reference_config_rebuilds_explicit_storybook_without_rewriting_script(self):
+        result = self.run_pipeline()
+        script_bytes = (result.project_root / ".obscript/approved-script.json").read_bytes()
+        config = replace(config_fixture(self.root), visual_references=replace(
+            config_fixture(self.root).visual_references, frames_per_clip=3))
+        FakePlanningAgent.calls.clear()
+        Pipeline(config).run(resume_spec(result.project_root, storybook=True, render=False))
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual((result.project_root / ".obscript/approved-script.json").read_bytes(), script_bytes)
+        self.ingest.assert_called_once()
 
     def test_missing_or_empty_shared_direction_fails_before_source_import(self):
         for content in [None, "  \n"]:
@@ -1058,6 +1096,18 @@ class ProductionExecutionTests(unittest.TestCase):
         self.failure = None
         self._patched_rerender()
         self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
+
+    def test_visual_reference_handoff_reaches_hyperframes_request(self):
+        collection = {"schema_version": "1", "sources": [{"source_id": "source-01", "status": "complete",
+                      "segments": [{"clip": "/references/clip.mp4", "frames": [{"path": "/references/frame.jpg", "source_seconds": 22}]}]}],
+                      "consolidated_brief": "Use a guided focal path", "usage_instruction": "Adapt observable techniques"}
+        write_yaml(self.root / "visual-references.yaml", collection)
+        self.patched_produce()
+        request = read_json(self.root / ".obscript/produce-video.request.json")
+        self.assertEqual(request["visual_references"]["consolidated_brief"], collection["consolidated_brief"])
+        self.assertEqual(request["visual_references"]["sources"], collection["sources"])
+        self.assertEqual(request["visual_references"]["artifact"], str(self.root / "visual-references.yaml"))
+        self.assertIn("visual-references.yaml", " ".join(read_json(self.root / ".obscript/production-attempt-inputs.json")))
 
     def test_single_run_produces_complete_storybook_and_actual_duration(self):
         output = self.patched_produce()

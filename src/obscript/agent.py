@@ -49,7 +49,8 @@ class StructuredAgent:
         write_json(destination, split_schema)
         return destination
 
-    def run(self, *, stage: str, skill: str, prompt: str, schema: str) -> tuple[dict, Path]:
+    def run(self, *, stage: str, skill: str, prompt: str, schema: str,
+            image_paths: tuple[Path, ...] = ()) -> tuple[dict, Path]:
         self._counter += 1
         stem = f"{self._counter:02d}-{stage}"
         output_path = self.state_dir / f"{stem}.json"
@@ -77,7 +78,8 @@ Return only a JSON object that satisfies the supplied output schema.
 Stage request:
 {prompt.strip()}
 """
-        self._execute(stage=stage, prompt=full_prompt, schema_path=schema_path, output_path=output_path)
+        attachments = {"image_paths": image_paths} if image_paths else {}
+        self._execute(stage=stage, prompt=full_prompt, schema_path=schema_path, output_path=output_path, **attachments)
         if not output_path.exists():
             raise AgentError(f"Agent produced no structured output during {stage}")
         try:
@@ -88,5 +90,6 @@ Stage request:
             raise AgentError(f"Agent returned a non-object during {stage}")
         return result, output_path
 
-    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path) -> None:
+    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path,
+                 image_paths: tuple[Path, ...] = ()) -> None:
         raise NotImplementedError

@@ -7,6 +7,7 @@ source → analyze-source → pipeline → time → format
        → plan-script → write-script → review-script
                                       ↓ pass
                                       ↓ --storybook or --render
+       → visual-references (source videos, cached, best effort)
        → storybook → validate-storybook
                                       ↓ --render
        → produce-video → package-production
@@ -23,6 +24,7 @@ The local defaults match this workstation:
 - transcripts: `/home/zalmo/transcripts`
 - rescript output root: `/home/zalmo/documents/obsidian/Videos/Videos`
 - shared visual standards: `OUTPUT_DIR/Globals/creative-direction.md`
+- visual reference sampling: `yt-dlp`, FFmpeg and FFprobe from `PATH`, plus an image-capable agent model
 
 Install the executable and symlink all versioned skills into the Codex skill directory:
 
@@ -182,7 +184,55 @@ If the last script review still requests revision, `script.md` and `review.yaml`
 
 The approved structured script in `.obscript/approved-script.json` is the sole spoken source. Scenes partition its narration into exact contiguous excerpts, each bound to one section. The shared creative-direction Markdown supplies visual standards to all videos. `storybook.md` links to that source, and `.obscript/creative-direction-source.json` records its absolute path and content hash without copying its standards. `storybook.md` displays an English timeline and a concise Scene / Layout paragraph for each scene: concrete elements, asset references, hierarchy, qualitative spatial relationships, backgrounds, timed explanatory animation, camera focus, and transitions. These production directions describe what appears rather than re-explaining narration. Production resolves geometry and motion measurements from the actual assets and inspected frames; scene plans retain only measurements explicitly required by the user or shared standards, meaningful subject quantities, and useful action timestamps. Narration and on-screen labels keep their original language. Storybook schema 3 requires every scene to resolve five design pillars together: context accuracy, recorded local-asset search and selection, explanatory animation beyond entrances and exits, a semantically mapped visual abstraction, and one mute-readable attention anchor. Validation requires context-relevant foreground library assets in at least `ceil(4n/5)` scenes and verified raster backgrounds from `background1` in at least `ceil(n/5)` scenes; selected paths must be traceable through the scene's structured production fields. An explicit `--storybook` run rebuilds an obsolete storybook contract, while `--render` blocks until that rebuild occurs. `storybook.yaml` retains the complete structured scene fields and exact narration references. `storybook.yaml` remains the structured production plan and is revalidated before rendering. Scene durations primarily fall between 3 and 12 seconds and become the animation's allocated intervals. `voiceover.text` remains the exact human narration reference, not a request to generate speech. The same boundaries appear in `script.md` as `HH:MM:SS.mmm` cues at section and scene level, while `script-readable.md` preserves the approved section-based script without timestamps for comfortable reading. On-screen text supplements narration. Text density is a layout and readability choice, with no fixed word-count limit and no word-count validation gate.
 
-Rendering uses sequential runs of the selected harness through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. Each handoff contains the verbatim shared creative-direction Markdown, its source path, and one bounded storyboard batch with immutable narration references, planned timestamps, and scene output destinations. All iterations resume the same editable project at `production/hyperframes/`; only the final iteration receives the compact all-scene assembly map and final video destination. The producer writes `BRIEF.md` after initialization and extends the project across batches. Defaults are 20 pending scenes per iteration, 1920×1080, and 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+Rendering uses sequential runs of the selected harness through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. Each handoff contains the verbatim shared creative-direction Markdown, its source path, a visual-reference collection, and one bounded storyboard batch with immutable narration references, planned timestamps, and scene output destinations. All iterations resume the same editable project at `production/hyperframes/`; only the final iteration receives the compact all-scene assembly map and final video destination. The producer writes `BRIEF.md` after initialization and extends the project across batches. Defaults are 20 pending scenes per iteration, 1920×1080, and 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+
+### Automated source-video visual references
+
+Source projects prepare references after script approval, before `--storybook` planning or `--render` generation. Script-only runs, manual original projects, post-production and single-scene re-renders keep their existing workflows. Re-renders can use references already saved with the production unit.
+
+By default each source gets up to three nonoverlapping 15-second clips and six JPEG frames per clip. OBScript first retrieves metadata with yt-dlp, then downloads at most six four-second video probes. Chapter boundaries and transcript pauses guide these probes, alongside irregular broad coverage. FFmpeg decodes probes at two frames per second into tiny RGB frames; color histograms, spatial color features and adjacent-frame changes guide a greedy diversity selection. Redundant candidates are omitted, so visually repetitive or short sources can yield fewer clips. Representative frames cover the clip, including its strongest measured changes. These are bounded heuristics, not exhaustive scene understanding; fast transitions, small text and subtle camera motion can be missed.
+
+Downloads use [yt-dlp section ranges](https://github.com/yt-dlp/yt-dlp#download-options), force cut keyframes and prefer video streams at or below 480p. FFmpeg normalizes each selected section to a silent MP4 and FFprobe checks its duration. There is no automatic full-video fallback. Network savings depend on the source's seek/range support; a server can require additional data beyond the requested interval. Existing browser or exported-cookie settings are reused. Use accessible sources whose content you are permitted to process; the feature does not bypass DRM or access restrictions. Playlists need the individual video's URL in ingestion metadata (`webpage_url`, `video_url` or `source_url`); otherwise extraction reports that an individual URL is required.
+
+The `analyze-visual-reference` stage attaches frames to the configured Codex or OpenCode model and returns composition/framing, palette/lighting/contrast, camera/graphic motion, typography/text, transitions/rhythm, and animation/effects. Observations must cite an extracted frame and its original timestamp; temporal observations require two distinct frames. Unsupported properties remain `unknown`. The brief cites segments and describes how to adapt supported techniques to new narration. Shared creative standards and manual scene direction remain authoritative. Source footage is reference material and is not inserted into the generated video.
+
+```text
+sources/source-01-TITLE/visual-references/
+  reference.json                    # source metadata, status, errors, analysis and brief
+  processing.log                    # bounded tool diagnostics, with URLs redacted
+  FINGERPRINT/
+    media.json                      # extraction checkpoint independent of agent analysis
+    probe-01.mp4                    # bounded selection probes
+    segment-01-000012345.mp4         # segment index and original start in milliseconds
+    segment-01-000012345-frame-01.jpg
+    *.receipt.json                  # verified section boundaries and media hashes
+visual-references.yaml              # per-unit collection, brief and absolute media paths
+```
+
+Reference paths inside `reference.json` are relative to its directory. Each frame stores both clip-local and original source seconds. Split units share the same source extraction; remix units receive all participating sources; independent playlist units receive only their own source. Production requests include `visual_references`, and the producer carries the artifact and media paths into HyperFrames `BRIEF.md`.
+
+Successful references are reused when recorded source metadata, transcript timestamps, sampling configuration, analysis skill/schema and file hashes match. This includes usable partial collections with a validated analysis. Remote content is not rechecked on every run. An analysis failure retains the extracted media and retries analysis without downloading it again. Missing or corrupted media invalidates its checkpoint; verified section receipts permit unaffected downloads to be reused. Changed reference collections invalidate render reuse; an explicit `--storybook` rebuilds plans previously created with different references. Rendering retains existing manual scene plans. To force a fresh extraction of changed remote content or retry omitted partial segments, remove that source's `visual-references/` directory before resuming.
+
+Downloads, unavailable videos, absent dependencies, timeouts or an agent without image support record `failed`, `unavailable` or `partial` with actionable errors and continue planning/rendering. `disabled` records an explicit opt-out. Original transcripts without a video URL are still usable. Inspect `reference.json` and `processing.log` for diagnostics.
+
+```bash
+obscript VIDEO --storybook
+obscript PROJECT_ID --render --visual-reference-clips 3 --visual-reference-duration 15 \
+  --visual-reference-frames 6 --visual-reference-probes 6
+obscript PROJECT_ID --render --no-visual-references
+```
+
+| Option | Default | Allowed range |
+| --- | --- | --- |
+| `--visual-reference-clips` | 3 | 1–10 |
+| `--visual-reference-duration` | 15 seconds | 1–60 |
+| `--visual-reference-frames` | 6 per clip | 2–12 |
+| `--visual-reference-probes` | 6 | 1–24 |
+| `--visual-reference-probe-duration` | 4 seconds | 1–10 |
+| `--visual-reference-height` | 480 pixels | 144–720 |
+| `--visual-reference-timeout` | 180 seconds per operation | 5–600 |
+
+Use `--yt-dlp`, `--ffmpeg` and `--ffprobe` to override the sampling executables. These overrides apply to reference extraction; the existing production verifier still resolves its own FFprobe. Timeouts stop the downloader and its FFmpeg children on POSIX systems. No additional Python package, database or service is required.
 
 Scene planning and rendering prefer the local visual asset library at `/home/zalmo/documents/obsidian/Videos/Videos/Globals/assets` for general illustrations, technical icons, emojis, raster backgrounds, and textures, including animated interactions. Agents inspect existing files before selecting them and use suitable library assets before inventing SVG foreground artwork, generating images, or searching external stock. Production copies selected assets into its editable project, carries the preference and asset mapping into `BRIEF.md`, and may recolor monochrome fills/strokes or animate icons and internal parts to match the shared direction and scene timing. At least `ceil(total scenes / 5)` scenes, and at least one scene in every nonempty video, visibly use a custom raster image from `background1` as a full-frame or substantial background region rather than only a plain base. These scenes are distributed across the timeline. Background images are evaluated by intrinsic dimensions, aspect ratio, and visible content: sufficiently resolved images can cover the frame, while tiny raster textures are repeated at a suitable scale across a substantial region. Backgrounds and patterns may be rotated, tilted, cropped, or layered, with enough coverage to avoid gaps and preserve foreground readability. SVGs are never generated or used as backgrounds, including SVG files present in a background collection; SVG icons and illustrations remain available as foreground elements. The shared library remains unchanged; explicit assets and meaningful brand or emoji colors are preserved.
 

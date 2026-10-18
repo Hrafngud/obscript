@@ -10,7 +10,8 @@ CodexError = AgentError
 
 
 class CodexAgent(StructuredAgent):
-    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path) -> None:
+    def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path,
+                 image_paths: tuple[Path, ...] = ()) -> None:
         command = [
             str(self.executable),
             "exec",
@@ -30,6 +31,8 @@ class CodexAgent(StructuredAgent):
         if self.model:
             command.extend(["--model", self.model])
         command.extend(["--config", f'model_reasoning_effort="{self.reasoning_effort}"'])
+        for path in image_paths:
+            command.extend(["--image", str(path)])
         command.append("-")
 
         print(f"[obscript] codex → {stage}", flush=True)

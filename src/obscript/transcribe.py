@@ -53,6 +53,7 @@ def _asset_from_directory(directory: Path, original: str) -> SourceAsset:
         transcript_json=json_path.resolve() if json_path.exists() else None,
         language=str(metadata.get("language") or "unknown"),
         duration_seconds=duration,
+        media_source=metadata.get("webpage_url") or metadata.get("video_url") or metadata.get("source_url"),
     )
 
 

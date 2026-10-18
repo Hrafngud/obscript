@@ -32,6 +32,7 @@ from .storage import (
     write_yaml,
 )
 from .transcribe import ingest_source
+from .visual_references import ensure_source_references, write_reference_collection, REFERENCE_POLICY
 
 
 @dataclass(frozen=True)
@@ -251,7 +252,8 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                 update_project(project_root, phase="transcript", unit=unit_dir)
         outputs: list[Path] = []
         all_passed = True
-        for unit_dir, unit_knowledge in units:
+        references: dict[str, Path] = {}
+        for unit_index, (unit_dir, unit_knowledge) in enumerate(units):
             unit_dir.mkdir(parents=True, exist_ok=True)
             unit_agent = agent if unit_dir == project_root else self._agent(unit_dir)
             approved = self._produce_script(unit_agent, spec, unit_dir, unit_knowledge)
@@ -261,6 +263,16 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                 update_project(project_root, phase="script", unit=unit_dir)
                 if not (spec.storybook or spec.render):
                     continue
+                # Use ingestion order, not model-generated IDs, for independent playlist units.
+                relative_dirs = [sources[unit_index]] if spec.pipeline == "single" and len(analyses) > 1 else sources
+                unit_references = []
+                for relative_dir in relative_dirs:
+                    source_dir = project_root / relative_dir
+                    if relative_dir not in references:
+                        references[relative_dir] = ensure_source_references(source_dir, self.config, agent)
+                        outputs.append(references[relative_dir])
+                    unit_references.append(references[relative_dir])
+                outputs.append(write_reference_collection(unit_dir, unit_references))
                 if read_creative_direction(direction_path) != direction:
                     raise ContractError("Shared creative direction changed during this run; rerun to rebuild the scene plans")
                 storybook, storybook_path = self._get_storybook(
@@ -429,6 +441,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                 data = copy_if_present(asset.transcript_json, source_dir / "transcript.json")
                 write_json(source_dir / "source.json", {
                     "id": f"source-{index:02d}", "title": asset.title, "source": asset.original,
+                    "media_source": asset.media_source,
                     "language": asset.language, "duration_seconds": round(asset.duration_seconds, 3),
                     "transcript_txt": str(txt), "transcript_srt": str(srt) if srt else None,
                     "transcript_json": str(data) if data else None,
@@ -709,8 +722,13 @@ Return findings only; do not rewrite the script. {original_guidance}""",
             if scene_count > approved.target_seconds:
                 raise ContractError("scene count cannot exceed target duration in seconds")
         path = unit_dir / "storybook.yaml"
+        references_path = unit_dir / "visual-references.yaml"
+        reference_receipt = unit_dir / ".obscript/storybook-reference-inputs.json"
+        reference_inputs = {"sha256": file_sha256(references_path) if references_path.is_file() else None}
         reference = unit_dir / ".obscript/creative-direction-source.json"
         if path.exists():
+            if not render and reference_receipt.is_file() and read_json(reference_receipt) != reference_inputs:
+                return self._create_storybook(agent, unit_dir, approved, direction_path, scene_count=scene_count)
             storybook = read_yaml(path)
             if storybook.get("schema_version") != STORYBOOK_SCHEMA_VERSION:
                 if not render:
@@ -781,6 +799,10 @@ Return findings only; do not rewrite the script. {original_guidance}""",
             if scene_count is not None else
             "Choose scene count and timing from meaningful narration and visual turns."
         )
+        reference_instruction = (
+            f"Visual reference collection: {unit_dir / 'visual-references.yaml'}. {REFERENCE_POLICY}"
+            if (unit_dir / "visual-references.yaml").is_file() else ""
+        )
         # A bounded retry prevents endless planning; all attempts and errors remain inspectable.
         for attempt in range(1, 4):
             storybook, _ = agent.run(
@@ -791,6 +813,7 @@ The shared Markdown is the single source of truth for visual standards. Honor ev
 Blank fields and template suggestions are unspecified, not instructions to invent a new identity.
 Resolve each scene's visual intent and explanatory sequence; leave implementation measurements to production. Never create or edit a creative-direction file.
 Approval: {approved.review_path}. Target: {approved.target_seconds} seconds.
+{reference_instruction}
 {scene_instruction}
 Cover every narration word exactly once in original section order, as contiguous exact excerpts.
 No scene may span sections. Timing starts at zero, is continuous, and ends at the target.
@@ -830,6 +853,9 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                 raise ContractError("Shared creative direction changed during storybook planning; rerun to rebuild the scene plan")
             write_json(unit_dir / ".obscript/creative-direction-source.json", creative_direction_reference(direction_path, direction))
             write_json(path, storybook)
+            reference_file = unit_dir / "visual-references.yaml"
+            write_json(unit_dir / ".obscript/storybook-reference-inputs.json",
+                       {"sha256": file_sha256(reference_file) if reference_file.is_file() else None})
             write_yaml(unit_dir / "storybook.yaml", storybook)
             (unit_dir / "storybook.md").write_text(render_storybook(storybook, approved.script, direction_path=direction_link), encoding="utf-8")
             (unit_dir / "script-readable.md").write_text(render_script(approved.script), encoding="utf-8")
@@ -849,6 +875,9 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                   file_sha256(path)
                   for path in [approved.script_path, approved.review_path, direction_path, storybook_path,
                                unit_dir / "storybook.md"] if path.is_file()}
+        references_path = unit_dir / "visual-references.yaml"
+        if references_path.is_file():
+            inputs["visual-references.yaml"] = file_sha256(references_path)
         video = unit_dir / "video.mp4"
         if receipt_path.exists() and video.exists() and (unit_dir / "production.yaml").exists():
             receipt = read_json(receipt_path)

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OBScript visual analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "segments",
+    "consolidated_brief"
+  ],
+  "properties": {
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segment_id",
+          "composition_framing",
+          "palette_lighting_contrast",
+          "camera_motion_graphics",
+          "typography_text",
+          "transitions_rhythm",
+          "animation_effects",
+          "limitations"
+        ],
+        "properties": {
+          "segment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "composition_framing": {
+            "$ref": "#/$defs/observation"
+          },
+          "palette_lighting_contrast": {
+            "$ref": "#/$defs/observation"
+          },
+          "camera_motion_graphics": {
+            "$ref": "#/$defs/observation"
+          },
+          "typography_text": {
+            "$ref": "#/$defs/observation"
+          },
+          "transitions_rhythm": {
+            "$ref": "#/$defs/observation"
+          },
+          "animation_effects": {
+            "$ref": "#/$defs/observation"
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "consolidated_brief": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "description",
+        "evidence"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "unknown"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frame_path",
+        "source_seconds"
+      ],
+      "properties": {
+        "frame_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

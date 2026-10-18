@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -30,6 +30,22 @@ class SourceAsset:
     transcript_json: Path | None
     language: str
     duration_seconds: float
+    media_source: str | None = None
+
+
+@dataclass(frozen=True)
+class VisualReferenceConfig:
+    enabled: bool = True
+    clip_count: int = 3
+    clip_seconds: float = 15
+    frames_per_clip: int = 6
+    probe_count: int = 6
+    probe_seconds: float = 4
+    max_height: int = 480
+    timeout_seconds: float = 180
+    yt_dlp: Path = Path("yt-dlp")
+    ffmpeg: Path = Path("ffmpeg")
+    ffprobe: Path = Path("ffprobe")
 
 
 @dataclass(frozen=True)
@@ -59,6 +75,7 @@ class RuntimeConfig:
     post_production_batch_size: int = 20
     post_production_instruction: str | None = None
     post_production_target: PostProductionTarget | None = None
+    visual_references: VisualReferenceConfig = field(default_factory=VisualReferenceConfig)
 
     @property
     def agent_executable(self) -> Path:

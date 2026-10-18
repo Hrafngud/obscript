@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -9,6 +10,16 @@ from obscript.transcribe import _subtitle_to_text, ingest_source
 
 
 class TranscriptionTests(unittest.TestCase):
+    def test_import_retains_individual_video_url_for_visual_references(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "transcript.txt").write_text("Texto")
+            (root / "transcript.json").write_text(json.dumps({"title": "Video", "duration": 30,
+                "webpage_url": "https://example.com/individual-video"}))
+            asset = ingest_source(str(root), ytstt=Path("unused"), transcripts_dir=root / "unused")[0]
+            self.assertEqual(asset.original, str(root))
+            self.assertEqual(asset.media_source, "https://example.com/individual-video")
+
     def test_authentication_forwarding(self) -> None:
         for options, expected in (
             ({"cookies_from_browser": "firefox:default"}, ["--cookies-from-browser", "firefox:default"]),

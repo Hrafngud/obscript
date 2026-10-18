@@ -10,7 +10,8 @@ from pathlib import Path
 from . import __version__
 from .agent import AgentError
 from .contracts import ContractError, parse_command_tokens, parse_duration
-from .models import CommandSpec, PostProductionTarget, RuntimeConfig
+from .models import CommandSpec, PostProductionTarget, RuntimeConfig, VisualReferenceConfig
+from .visual_references import validate_config
 from .pipeline import Pipeline
 from .production import ProductionError
 from .projects import create_original_project, find_project, resume_spec
@@ -166,6 +167,17 @@ is mandatory and has no translate modifier.
         help="maximum scenes per post-production iteration (default: 20; requires --post-production)",
     )
     parser.add_argument("--verbose", action="store_true", help="show agent CLI output")
+    parser.add_argument("--no-visual-references", action="store_true", help="skip source-video visual sampling")
+    parser.add_argument("--visual-reference-clips", type=int, default=3, metavar="COUNT")
+    parser.add_argument("--visual-reference-duration", type=float, default=15, metavar="SECONDS")
+    parser.add_argument("--visual-reference-frames", type=int, default=6, metavar="COUNT")
+    parser.add_argument("--visual-reference-probes", type=int, default=6, metavar="COUNT")
+    parser.add_argument("--visual-reference-probe-duration", type=float, default=4, metavar="SECONDS")
+    parser.add_argument("--visual-reference-height", type=int, default=480, metavar="PIXELS")
+    parser.add_argument("--visual-reference-timeout", type=float, default=180, metavar="SECONDS")
+    parser.add_argument("--yt-dlp", type=Path, default=Path("yt-dlp"), help="visual sampling downloader")
+    parser.add_argument("--ffmpeg", type=Path, default=Path("ffmpeg"), help="visual sampling FFmpeg")
+    parser.add_argument("--ffprobe", type=Path, default=Path("ffprobe"), help="visual sampling FFprobe")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -210,6 +222,8 @@ def _print_dry_run(spec, project_root: Path | None = None) -> None:
     if not original:
         stages.extend(["plan-script", "write-script", "review-script"])
     if spec.storybook or spec.render:
+        if not original:
+            stages.append("visual-references (cached, best effort)")
         stages.extend(["storybook", "validate-storybook"])
     if spec.render:
         stages.extend(["produce-video", "package-production"])
@@ -260,6 +274,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        visual_references = VisualReferenceConfig(
+            enabled=not args.no_visual_references, clip_count=args.visual_reference_clips,
+            clip_seconds=args.visual_reference_duration, frames_per_clip=args.visual_reference_frames,
+            probe_count=args.visual_reference_probes, probe_seconds=args.visual_reference_probe_duration,
+            max_height=args.visual_reference_height, timeout_seconds=args.visual_reference_timeout,
+            yt_dlp=args.yt_dlp.expanduser(), ffmpeg=args.ffmpeg.expanduser(), ffprobe=args.ffprobe.expanduser())
+        validate_config(visual_references)
         post_production_target, post_production_instruction = _post_production_args(args.post_production)
         post_production_requested = args.post_production is not None
         rerender_scene_id = None
@@ -356,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
             post_production_batch_size=args.post_production_batch_size or 20,
             post_production_instruction=post_production_instruction,
             post_production_target=post_production_target,
+            visual_references=visual_references,
         )
         result = Pipeline(config).run(spec)
     except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:
