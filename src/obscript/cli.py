@@ -122,8 +122,8 @@ is mandatory and has no translate modifier.
     parser.add_argument(
         "--reasoning-effort",
         choices=["low", "medium", "high", "xhigh"],
-        default="medium",
-        help="Codex reasoning effort per stage (default: medium; OpenCode uses its own config)",
+        default="high",
+        help="Codex reasoning effort per stage (default: high; OpenCode uses its own config)",
     )
     parser.add_argument(
         "--review-passes",
@@ -224,7 +224,7 @@ def _print_dry_run(spec, project_root: Path | None = None) -> None:
     if spec.storybook or spec.render:
         if not original:
             stages.append("visual-references (cached, best effort)")
-        stages.extend(["storybook", "validate-storybook"])
+        stages.extend(["storybook", "validate-storybook", "review-storybook (targeted repair if needed)"])
     if spec.render:
         stages.extend(["produce-video", "package-production"])
     if project_root:

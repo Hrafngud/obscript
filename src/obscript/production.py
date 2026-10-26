@@ -115,6 +115,15 @@ def validate_storybook(
                 raise ContractError(f"{scene_id}: design pillar {field} has no resolved decision")
         asset_plan = pillars["assets"]
         selected_assets = asset_plan["selected_assets"]
+        external_foregrounds = set()
+        for graphic in scene.get("external_graphics", []):
+            path = Path(graphic["local_path"])
+            if not path.is_absolute() or not path.is_file() or file_sha256(path) != graphic["sha256"]:
+                raise ContractError(f"{scene_id}: downloaded diagram is missing or changed: {path}")
+            if graphic["use_mode"] != "reference":
+                if not graphic["license"].strip():
+                    raise ContractError(f"{scene_id}: downloaded diagram reuse has no recorded permission")
+                external_foregrounds.add(str(path))
         exception_reason = normalize_whitespace(asset_plan["exception_reason"])
         candidates = set(asset_plan["candidates_considered"])
         visual_asset_text = "\n".join(item["content"] for item in scene["visual_elements"])
@@ -132,7 +141,7 @@ def validate_storybook(
             if path not in visual_asset_text or path not in requirement_asset_text or path not in scene["render_brief"]:
                 raise ContractError(f"{scene_id}: selected asset is not repeated across all scene production fields: {path}")
             if asset["usage"] == "foreground":
-                has_foreground = has_foreground or is_library_asset
+                has_foreground = has_foreground or is_library_asset or path in external_foregrounds
             else:
                 suffix = Path(path).suffix.lower()
                 if suffix == ".svg":
@@ -144,6 +153,11 @@ def validate_storybook(
         if not has_foreground and not exception_reason:
             raise ContractError(f"{scene_id}: no contextual foreground asset was selected and no exception reason was given")
         foreground_asset_scenes += int(has_foreground)
+        if not external_foregrounds.issubset({a["path"] for a in selected_assets if a["usage"] == "foreground"}):
+            raise ContractError(f"{scene_id}: reused diagram must be selected as a foreground asset")
+        reference_only = {g["local_path"] for g in scene.get("external_graphics", []) if g["use_mode"] == "reference"}
+        if reference_only.intersection(a["path"] for a in selected_assets):
+            raise ContractError(f"{scene_id}: reference-only diagram cannot be a selected display asset")
         raster_background_scenes += int(has_raster_background)
         explanatory_motion = [scene["animation"][key] for key in ("continuous", "emphasis", "camera")]
         if all(normalize_whitespace(value).lower() in INACTIVE_MOTION for value in explanatory_motion):
@@ -171,15 +185,16 @@ def validate_storybook(
         )
 
 
-def invalidate_downstream(unit_dir: Path, changed: str) -> None:
+def invalidate_downstream(unit_dir: Path, changed: str, *, replan: bool = False) -> None:
     """Archive stale derivatives so they can never be mistaken for current output."""
     paths = ["post-production", "post-production.yaml", "video-polished.mp4",
              ".obscript/post-production-inputs.json", ".obscript/post-production-attempt-inputs.json"]
     if changed != "post-production":
         paths.extend(["production", "production.yaml", "video.mp4", ".obscript/production-inputs.json",
                       ".obscript/production-attempt-inputs.json"])
-    if changed in {"script", "creative-direction"}:
+    if changed in {"script", "creative-direction"} or (changed == "storybook" and replan):
         paths.extend(["storybook.md", "storybook.yaml", ".obscript/storybook.json", ".obscript/storybook-reference-inputs.json"])
+        paths.extend(["storybook-review.yaml", ".obscript/storybook-review.json", ".obscript/storybook-review-draft.json"])
     if changed == "script":
         paths.append(".obscript/approved-inputs.json")
         paths.extend(["script-readable.md", ".obscript/original-inputs.json", "creative-direction.md", ".obscript/creative-direction.json", ".obscript/creative-direction-source.json", ".obscript/approved-script.json", ".obscript/review.json"])

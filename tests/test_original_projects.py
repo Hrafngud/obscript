@@ -43,7 +43,7 @@ class OriginalProjectsTests(unittest.TestCase):
         self.producer = patch("obscript.pipeline.ProductionAgent").start()
         self.producer.return_value.produce.side_effect = self.produce
 
-    def agent_run(self, *, stage, skill, prompt, schema):
+    def agent_run(self, *, stage, skill, prompt, schema, **kwargs):
         self.calls.append(skill)
         self.prompts.append(prompt)
         if skill == "review-script":
@@ -51,6 +51,10 @@ class OriginalProjectsTests(unittest.TestCase):
                      "duration": {"expected_seconds": 12, "estimated_seconds": 12, "status": "on_target"},
                      "coverage": {"status": "complete", "missing_topic_refs": []}, "issues": [],
                      "recommendation": {"rerun": [], "reason": "Revisão"}}
+        elif skill == "review-storybook":
+            from test_visual_production import visual_review_fixture
+            number = stage.rsplit("-", 1)[1]
+            value = visual_review_fixture(read_json(self.root / ".obscript" / f"storybook-review-{number}.input.json")["scenes"])
         elif skill == "storybook":
             script = read_json(self.root / ".obscript/approved-script.json")
             target = script["metadata"]["target_duration_seconds"]
@@ -89,7 +93,7 @@ class OriginalProjectsTests(unittest.TestCase):
     def test_storybook_uses_shared_file_layout_and_reuses_review(self):
         result = self.run_project(storybook=True)
         self.assertTrue(result.passed_review)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
         self.ingest.assert_not_called()
         self.assertIn("### scene-001", (self.root / "script.md").read_text())
         self.assertNotIn("### scene-001", (self.root / "script-readable.md").read_text())
@@ -122,7 +126,7 @@ class OriginalProjectsTests(unittest.TestCase):
 
     def test_render_directly_and_resume_without_duplicate_model_calls(self):
         self.run_project(render=True)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
         self.producer.return_value.produce.assert_called_once()
         self.calls.clear()
         self.run_project(render=True)
@@ -134,7 +138,7 @@ class OriginalProjectsTests(unittest.TestCase):
         self.assertEqual(self.calls, ["review-script"])
         self.assertFalse((self.root / "storybook.yaml").exists())
         self.run_project(storybook=True)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
 
     def test_edits_in_either_view_reapprove_and_archive_old_render(self):
         for filename in ["script.md", "script-readable.md"]:
@@ -144,7 +148,7 @@ class OriginalProjectsTests(unittest.TestCase):
                 path.write_text(path.read_text().replace("A causa explica", "O mecanismo explica"))
                 self.calls.clear()
                 self.run_project(storybook=True)
-                self.assertEqual(self.calls, ["review-script", "storybook"])
+                self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
                 self.assertFalse((self.root / "video.mp4").exists())
                 self.assertTrue(list((self.root / ".obscript/invalidated").glob("*/video.mp4")))
                 for name in ["script.md", "script-readable.md"]:
@@ -189,7 +193,7 @@ class OriginalProjectsTests(unittest.TestCase):
         self.verdict = "pass"
         self.calls.clear()
         self.assertTrue(self.run_project(storybook=True).passed_review)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
         self.assertIn("O mecanismo explica", (self.root / "script-readable.md").read_text())
 
     def test_duration_edits_and_notes_trigger_review(self):
@@ -198,14 +202,14 @@ class OriginalProjectsTests(unittest.TestCase):
         path.write_text(path.read_text().replace("target_duration_seconds: 12", "target_duration_seconds: 18"))
         self.calls.clear()
         self.run_project(storybook=True)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
         self.assertEqual(read_yaml(self.root / "storybook.yaml")["target_duration_seconds"], 18)
         (self.root / "fontes.md").write_text("Referências do autor")
         self.calls.clear()
         self.run_project(storybook=True)
-        self.assertEqual(self.calls, ["review-script", "storybook"])
-        self.assertIn("not independent factual evidence", self.prompts[-2])
-        self.assertIn(str(self.root / "fontes.md"), self.prompts[-2])
+        self.assertEqual(self.calls, ["review-script", "storybook", "review-storybook"])
+        self.assertIn("not independent factual evidence", self.prompts[-3])
+        self.assertIn(str(self.root / "fontes.md"), self.prompts[-3])
 
     def test_changed_narration_blocks_rerender_and_polish(self):
         self.run_project(render=True)
@@ -228,7 +232,7 @@ class OriginalProjectsTests(unittest.TestCase):
             self.run_project(render=True)
 
     def test_edits_during_review_or_storybook_are_preserved(self):
-        for during in ["review-script", "storybook"]:
+        for during in ["review-script", "storybook", "review-storybook"]:
             with self.subTest(during=during):
                 (self.root / "script.md").write_text(self.draft)
                 def mutate(skill):

@@ -1,0 +1,137 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "research",
+    "scenes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "queries",
+        "note"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "unavailable",
+            "not_needed"
+          ]
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scene_id",
+          "verdict",
+          "concept",
+          "reason",
+          "representation",
+          "animation",
+          "references"
+        ],
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "pattern": "^scene-[0-9]{3,}$"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "revise"
+            ]
+          },
+          "concept": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "representation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "animation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "source_url",
+                "figure_url",
+                "license",
+                "attribution",
+                "use_mode",
+                "adaptation"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source_url": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "figure_url": {
+                  "type": "string"
+                },
+                "license": {
+                  "type": "string"
+                },
+                "attribution": {
+                  "type": "string"
+                },
+                "use_mode": {
+                  "type": "string",
+                  "enum": [
+                    "reference",
+                    "reuse",
+                    "animate"
+                  ]
+                },
+                "adaptation": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

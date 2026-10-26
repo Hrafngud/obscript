@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .codex_agent import CodexAgent
-from .agent import StructuredAgent
+from .agent import AgentError, StructuredAgent
 from .opencode_agent import OpenCodeAgent
 from .contracts import ContractError, choose_target_duration, script_duration_bounds
 from .models import CommandSpec, RuntimeConfig
@@ -33,6 +33,7 @@ from .storage import (
 )
 from .transcribe import ingest_source
 from .visual_references import ensure_source_references, write_reference_collection, REFERENCE_POLICY
+from .storybook_review import review_storybook
 
 
 @dataclass(frozen=True)
@@ -783,7 +784,7 @@ Return findings only; do not rewrite the script. {original_guidance}""",
         self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
         direction_path: Path, *, scene_count: int | None = None,
     ) -> tuple[dict, Path]:
-        invalidate_downstream(unit_dir, "storybook")
+        invalidate_downstream(unit_dir, "storybook", replan=True)
         original = (unit_dir / ".obscript/original-inputs.json").is_file()
         if original:
             self._validate_original_checkpoint(unit_dir, CommandSpec(**approved.script["metadata"], sources=()))
@@ -846,6 +847,19 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
                 if attempt == 3:
                     raise ContractError(f"Storybook remained invalid after 3 attempts: {exc}; inspect {unit_dir / 'storybook.md'}") from exc
                 continue
+            try:
+                storybook = review_storybook(
+                    writer=agent, reviewer=self._agent(unit_dir),
+                    storybook=storybook, script=approved.script, direction_path=direction_path,
+                    unit_dir=unit_dir, repo=self.config.repo_root, scene_count=scene_count,
+                )
+            except (ContractError, AgentError) as exc:
+                draft = unit_dir / ".obscript/storybook-review-draft.json"
+                (unit_dir / "storybook.md").write_text(
+                    render_storybook(read_json(draft) if draft.exists() else storybook, approved.script,
+                                     direction_path=direction_link, validation_error=str(exc)), encoding="utf-8",
+                )
+                raise
             path = unit_dir / ".obscript/storybook.json"
             if original:
                 self._validate_original_checkpoint(unit_dir, CommandSpec(**approved.script["metadata"], sources=()))

@@ -280,7 +280,7 @@ class CliDefaultsTests(unittest.TestCase):
         self.assertIn("storybook_scene_count: 10", output.getvalue())
 
     def test_default_and_storybook_dry_run_stop_at_requested_phase(self) -> None:
-        for flags, ending in [([], "review-script"), (["--storybook"], "validate-storybook")]:
+        for flags, ending in [([], "review-script"), (["--storybook"], "review-storybook (targeted repair if needed)")]:
             with contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(main(["VIDEO", "--dry-run", *flags]), 0)
             pipeline = output.getvalue().splitlines()[0]

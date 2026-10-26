@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scenes"
+  ],
+  "properties": {
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -38,6 +38,17 @@ def knowledge_fixture():
 
 
 class OpenCodeAgentTests(unittest.TestCase):
+    def test_research_permissions_are_scoped_to_the_initial_review(self):
+        with patch.dict(os.environ, {"OPENCODE_CONFIG_CONTENT": "{}"}):
+            harness = OpenCodeHarness(Path("opencode"), REPO)
+            ordinary = json.loads(harness.environment()["OPENCODE_CONFIG_CONTENT"])["permission"]
+            research = json.loads(harness.environment(web_search=True)["OPENCODE_CONFIG_CONTENT"])["permission"]
+        self.assertNotIn("websearch", ordinary)
+        self.assertEqual(research["websearch"], "allow")
+        self.assertEqual(research["webfetch"], "allow")
+        self.assertEqual(research["*"], "deny")
+        self.assertNotIn("bash", research)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

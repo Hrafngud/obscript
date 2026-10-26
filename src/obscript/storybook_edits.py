@@ -31,19 +31,23 @@ def _sections(markdown: str) -> tuple[dict[str, str], str]:
     return scenes, shared.group(1).strip() if shared else ""
 
 
-def _selected_assets(layout: str) -> list[dict[str, str]]:
+def _selected_assets(layout: str, external_graphics: list[dict] | None = None) -> list[dict[str, str]]:
     labels = {}
     for label, url in ASSET_LINK.findall(layout):
         path = resolve_asset_links(url)
         labels[path] = label
     resolved = resolve_asset_links(layout)
+    external = {graphic["local_path"] for graphic in external_graphics or [] if graphic["use_mode"] != "reference"}
+    for path in external:
+        if path in resolved:
+            labels[path] = Path(path).stem
     for match in ABSOLUTE_ASSET.finditer(resolved):
         path = match.group().rstrip(".,:;")
         labels.setdefault(path, Path(path).stem)
     selected = []
     for path, label in labels.items():
         asset = Path(unquote(path))
-        if not asset.resolve().is_relative_to(ASSET_LIBRARY_ROOT.resolve()) or not asset.is_file():
+        if (not asset.resolve().is_relative_to(ASSET_LIBRARY_ROOT.resolve()) and path not in external) or not asset.is_file():
             raise ContractError(f"Readable storybook selects a missing or external asset: {path}")
         background = "/background1/" in path and asset.suffix.lower() in RASTER_EXTENSIONS
         selected.append({"path": path, "usage": "background" if background else "foreground",
@@ -64,7 +68,11 @@ def apply_readable_storybook(storybook: dict, markdown: str, baseline_markdown: 
         layout = layouts[scene_id]
         if not layout:
             raise ContractError(f"{scene_id}: readable storybook Layout is empty")
-        selected = _selected_assets(layout)
+        selected = _selected_assets(layout, scene.get("external_graphics"))
+        if "external_graphics" in scene:
+            selected_paths = {asset["path"] for asset in selected}
+            scene["external_graphics"] = [g for g in scene["external_graphics"]
+                                         if g["use_mode"] == "reference" or g["local_path"] in selected_paths]
         old_paths = {asset["path"] for asset in scene["design_pillars"]["assets"]["selected_assets"]}
         scene["render_brief"] = resolve_asset_links(layout)
         scene["composition"]["layout"] = scene["render_brief"]

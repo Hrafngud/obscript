@@ -35,6 +35,14 @@ class StructuredAgent:
 
     def _resolved_schema(self, schema_name: str) -> Path:
         source = self.repo_root / "schemas" / f"{schema_name}.schema.json"
+        if schema_name == "storybook-revision":
+            storybook = read_json(self.repo_root / "schemas/storybook.schema.json")
+            revision = read_json(source)
+            revision["properties"]["scenes"]["items"] = storybook["properties"]["scenes"]["items"]
+            revision["$defs"] = storybook.get("$defs", {})
+            destination = self.state_dir / "storybook-revision.resolved.schema.json"
+            write_json(destination, revision)
+            return destination
         if schema_name != "split":
             return source
 
@@ -50,7 +58,7 @@ class StructuredAgent:
         return destination
 
     def run(self, *, stage: str, skill: str, prompt: str, schema: str,
-            image_paths: tuple[Path, ...] = ()) -> tuple[dict, Path]:
+            image_paths: tuple[Path, ...] = (), web_search: bool = False) -> tuple[dict, Path]:
         self._counter += 1
         stem = f"{self._counter:02d}-{stage}"
         output_path = self.state_dir / f"{stem}.json"
@@ -63,7 +71,7 @@ class StructuredAgent:
             "Write scene and production instructions in English. Preserve voiceover.text verbatim, "
             "keep on-screen text in the script's language unless shared creative direction specifies otherwise, "
             "and preserve IDs and asset paths exactly."
-            if schema == "storybook" else
+            if schema in {"storybook", "storybook-revision", "storybook-review"} else
             "All natural-language fields must be written in Brazilian Portuguese unless a field explicitly stores source-language metadata."
         )
         full_prompt = f"""You are executing one deterministic stage of the obscript pipeline.
@@ -79,6 +87,8 @@ Stage request:
 {prompt.strip()}
 """
         attachments = {"image_paths": image_paths} if image_paths else {}
+        if web_search:
+            attachments["web_search"] = True
         self._execute(stage=stage, prompt=full_prompt, schema_path=schema_path, output_path=output_path, **attachments)
         if not output_path.exists():
             raise AgentError(f"Agent produced no structured output during {stage}")
@@ -91,5 +101,5 @@ Stage request:
         return result, output_path
 
     def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path,
-                 image_paths: tuple[Path, ...] = ()) -> None:
+                 image_paths: tuple[Path, ...] = (), web_search: bool = False) -> None:
         raise NotImplementedError

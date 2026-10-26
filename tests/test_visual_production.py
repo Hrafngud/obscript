@@ -340,6 +340,14 @@ class StorybookValidationTests(unittest.TestCase):
             validate_storybook(script, story_fixture(), 12)
 
 
+def visual_review_fixture(scenes, rejected=()):
+    return {"schema_version": "1", "research": {"status": "not_needed", "queries": [], "note": ""},
+            "scenes": [{"scene_id": s["id"], "verdict": "revise" if s["id"] in rejected else "pass",
+                        "concept": "Request routing", "reason": "Visible route explains the relationship",
+                        "representation": "Route through a gateway", "animation": "Trace the request", "references": []}
+                       for s in scenes]}
+
+
 class FakePlanningAgent:
     calls: list[tuple[str, Path]] = []
     prompts: list[tuple[str, str]] = []
@@ -353,7 +361,7 @@ class FakePlanningAgent:
         self.state.mkdir(parents=True, exist_ok=True)
         self.counter = 0
 
-    def run(self, *, stage, skill, prompt, schema):
+    def run(self, *, stage, skill, prompt, schema, **kwargs):
         self.counter += 1
         self.calls.append((stage, self.root))
         self.prompts.append((stage, prompt))
@@ -371,6 +379,10 @@ class FakePlanningAgent:
             value = script_fixture()
         elif skill == "review-script":
             value = {"verdict": self.verdicts.pop(0) if self.verdicts else "pass", "recommendation": {"rerun": []}}
+        elif skill == "review-storybook":
+            number = stage.rsplit("-", 1)[1]
+            request = read_json(self.state / f"storybook-review-{number}.input.json")
+            value = visual_review_fixture(request["scenes"])
         elif skill == "storybook":
             assert "shared creative direction" in prompt
             value = story_fixture()
@@ -435,7 +447,7 @@ class PipelineVisualTests(unittest.TestCase):
         result = self.run_pipeline(storybook_scene_count=3)
         root = result.project_root
         self.assertEqual(len(load_yaml(root / "storybook.yaml")["scenes"]), 3)
-        self.assertIn("Create exactly 3 scenes", FakePlanningAgent.prompts[-1][1])
+        self.assertIn("Create exactly 3 scenes", next(p for stage, p in FakePlanningAgent.prompts if stage == "storybook-01"))
         FakePlanningAgent.calls.clear()
         self.resume(root, storybook=True, storybook_scene_count=3)
         self.assertNotIn("storybook-01", [stage for stage, _ in FakePlanningAgent.calls])
@@ -483,7 +495,7 @@ class PipelineVisualTests(unittest.TestCase):
         FakePlanningAgent.calls.clear()
         resumed = self.resume(result.project_root, storybook=True)
         self.assertEqual(resumed.project_root, result.project_root)
-        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "review-storybook-01"])
         self.ingest.assert_called_once()
         self.producer.assert_not_called()
         self.assertEqual(read_json(result.project_root / "project.json")["id"], identity)
@@ -525,7 +537,7 @@ class PipelineVisualTests(unittest.TestCase):
         with patch("obscript.pipeline.OpenCodeAgent", FakePlanningAgent):
             resumed = Pipeline(config).run(spec)
         self.assertEqual(resumed.project_root, result.project_root)
-        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "review-storybook-01"])
         self.ingest.assert_called_once()
         self.assertEqual(load_yaml(result.project_root / "run.yaml")["agent"], "OpenCode CLI")
         self.assertEqual(self.producer.call_args.args[0].harness, "opencode")
@@ -591,7 +603,7 @@ class PipelineVisualTests(unittest.TestCase):
 
         FakePlanningAgent.calls.clear()
         self.resume(result.project_root, storybook=True)
-        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "review-storybook-01"])
         self.assertEqual(load_yaml(storybook_path)["schema_version"], "3")
 
     def test_invalid_manual_storybook_is_preserved_and_blocks_render(self):
@@ -625,7 +637,7 @@ class PipelineVisualTests(unittest.TestCase):
                 result = self.run_pipeline(tokens, storybook=False)
                 FakePlanningAgent.calls.clear()
                 self.resume(result.project_root, storybook=True)
-                self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "storybook-01"])
+                self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "review-storybook-01", "storybook-01", "review-storybook-01"])
                 for number in [1, 2]:
                     self.assertTrue((result.project_root / f"video-{number:02d}/storybook.yaml").exists())
 
@@ -784,7 +796,7 @@ class PipelineVisualTests(unittest.TestCase):
             config_fixture(self.root).visual_references, frames_per_clip=3))
         FakePlanningAgent.calls.clear()
         Pipeline(config).run(resume_spec(result.project_root, storybook=True, render=False))
-        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01"])
+        self.assertEqual([stage for stage, _ in FakePlanningAgent.calls], ["storybook-01", "review-storybook-01"])
         self.assertEqual((result.project_root / ".obscript/approved-script.json").read_bytes(), script_bytes)
         self.ingest.assert_called_once()
 
@@ -848,6 +860,15 @@ class PipelineVisualTests(unittest.TestCase):
         self.assertTrue((result.project_root / ".obscript/storybook-01.validation.json").exists())
         self.assertIn("storybook-02", [stage for stage, _ in FakePlanningAgent.calls])
         self.assertIn("status: validated", (result.project_root / "storybook.md").read_text())
+
+    def test_failed_visual_review_blocks_publication_and_rendering(self):
+        with patch("obscript.pipeline.review_storybook", side_effect=ContractError("Unresolved graphical explanation")):
+            with self.assertRaisesRegex(ContractError, "Unresolved graphical explanation"):
+                self.run_pipeline(render=True)
+        root = self.root / "outputs/teste"
+        self.assertFalse((root / "storybook.yaml").exists())
+        self.assertIn("status: invalid", (root / "storybook.md").read_text())
+        self.producer.assert_not_called()
         self.producer.assert_not_called()
 
     def test_retry_limit_stops_render(self):
@@ -1590,7 +1611,7 @@ class InvalidationAndDryRunTests(unittest.TestCase):
             self.assertEqual(main(["extend", "essay", "VIDEO", "--render", "--dry-run"]), 0)
         pipeline.assert_not_called()
         codex.assert_not_called()
-        self.assertIn("validate-storybook → produce-video → package-production", stdout.getvalue())
+        self.assertIn("validate-storybook → review-storybook (targeted repair if needed) → produce-video → package-production", stdout.getvalue())
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(["essay", "compress", "VIDEO", "--render", "--dry-run"]), 1)
 

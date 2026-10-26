@@ -280,8 +280,8 @@ def validate_analysis(analysis: dict, segments: list[dict], schema: dict) -> Non
             field = observed[aspect]
             if field["status"] == "observed" and not field["evidence"]:
                 raise ContractError(f"{aspect}: observed properties require frame evidence")
-            if field["status"] == "unknown" and field["evidence"]:
-                raise ContractError(f"{aspect}: unknown properties cannot claim evidence")
+            # Unknown fields may cite frames that explain the uncertainty.
+            # Validate those citations below without promoting them to observations.
             if field["status"] == "observed" and aspect in {"camera_motion_graphics", "transitions_rhythm", "animation_effects"} \
                     and len({e["frame_path"] for e in field["evidence"]}) < 2:
                 raise ContractError(f"{aspect}: temporal observations require at least two distinct frames")

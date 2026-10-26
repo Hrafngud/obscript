@@ -243,6 +243,49 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "image-capable"):
             validate_analysis(analysis, value["segments"], schema)
 
+    def test_cited_uncertainty_preserves_useful_analysis_and_cache_reuse(self):
+        def analyze(**kwargs):
+            analysis, path = self.analyze(**kwargs)
+            artifact = read_json(self.source / "visual-references/reference.json")
+            frame = artifact["segments"][0]["frames"][0]
+            analysis["segments"][0]["camera_motion_graphics"] = {
+                "status": "unknown", "description": "This still frame cannot establish camera movement.",
+                "evidence": [{"frame_path": frame["path"], "source_seconds": frame["source_seconds"]}],
+            }
+            return analysis, path
+        self.agent.run.side_effect = analyze
+        artifact = read_json(self.extract())
+        self.assertEqual(artifact["status"], "complete")
+        self.assertTrue(artifact["consolidated_brief"])
+        field = artifact["segments"][0]["analysis"]["camera_motion_graphics"]
+        self.assertEqual(field["status"], "unknown")
+        self.assertEqual(len(field["evidence"]), 1)
+        downloads = len(self.downloads)
+        self.extract()
+        self.agent.run.assert_called_once()
+        self.assertEqual(len(self.downloads), downloads)
+
+    def test_unknown_citations_still_require_real_frames_and_timestamps(self):
+        artifact = read_json(self.extract())
+        schema = read_json(REPO / "schemas/visual-analysis.schema.json")
+        frame = artifact["segments"][0]["frames"][0]
+        for evidence in [
+            {"frame_path": "invented.jpg", "source_seconds": frame["source_seconds"]},
+            {"frame_path": frame["path"], "source_seconds": frame["source_seconds"] + 5},
+        ]:
+            with self.subTest(evidence=evidence):
+                analysis = analysis_fixture(artifact["segments"])
+                analysis["segments"][0]["camera_motion_graphics"]["evidence"] = [evidence]
+                with self.assertRaisesRegex(ContractError, "original timestamp"):
+                    validate_analysis(analysis, artifact["segments"], schema)
+        analysis = analysis_fixture(artifact["segments"])
+        analysis["segments"][0]["camera_motion_graphics"] = {
+            "status": "observed", "description": "Camera moves.",
+            "evidence": [{"frame_path": frame["path"], "source_seconds": frame["source_seconds"]}],
+        }
+        with self.assertRaisesRegex(ContractError, "two distinct frames"):
+            validate_analysis(analysis, artifact["segments"], schema)
+
 
 class HarnessAndCommandTests(unittest.TestCase):
     def test_codex_and_opencode_receive_image_attachments(self):

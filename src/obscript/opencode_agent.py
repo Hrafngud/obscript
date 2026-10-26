@@ -27,7 +27,8 @@ class OpenCodeHarness:
             command.extend(["--model", self.model])
         return command
 
-    def environment(self, *, directory: Path | None = None, output_dir: Path | None = None) -> dict[str, str]:
+    def environment(self, *, directory: Path | None = None, output_dir: Path | None = None,
+                    web_search: bool = False) -> dict[str, str]:
         env = os.environ.copy()
         # OpenCode resolves its location from PWD before falling back to cwd.
         if directory is not None:
@@ -51,6 +52,8 @@ class OpenCodeHarness:
                 "*": "deny", "read": "allow", "glob": "allow", "grep": "allow",
                 "external_directory": "allow",
             }
+            if web_search:
+                config["permission"].update({"websearch": "allow", "webfetch": "allow"})
         else:
             permission = config.get("permission", {})
             if isinstance(permission, str):
@@ -123,7 +126,7 @@ class OpenCodeHarness:
 
 class OpenCodeAgent(StructuredAgent):
     def _execute(self, *, stage: str, prompt: str, schema_path: Path, output_path: Path,
-                 image_paths: tuple[Path, ...] = ()) -> None:
+                 image_paths: tuple[Path, ...] = (), web_search: bool = False) -> None:
         harness = OpenCodeHarness(self.executable, self.repo_root, self.model)
         schema = read_json(schema_path)
         prompt += "\nOutput JSON Schema:\n" + json.dumps(schema, ensure_ascii=False)
@@ -135,7 +138,7 @@ class OpenCodeAgent(StructuredAgent):
         try:
             result = subprocess.run(command, cwd=self.project_root, input=prompt, text=True,
                                     capture_output=True, check=False,
-                                    env=harness.environment(directory=self.project_root))
+                                    env=harness.environment(directory=self.project_root, web_search=web_search))
         except OSError as exc:
             raise AgentError(f"OpenCode executor could not start: {exc}") from exc
         log = (result.stdout or "") + (result.stderr or "")

@@ -389,6 +389,64 @@
             "type": "string",
             "minLength": 1,
             "description": "Self-contained English paragraph displayed as the readable scene's Layout: imperative directions for concrete elements, supplied asset paths or named asset requirements, hierarchy and qualitative spatial relationships, exact on-screen labels in their intended language, background treatment, explanatory action timing, camera focus, and transition. Leave implementation measurements to production unless explicitly required or meaningful to the subject. Apply shared styling without repeating its specification. Describe visible actions without re-explaining narration; agree with all structured scene fields."
+          },
+          "external_graphics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title",
+                "source_url",
+                "figure_url",
+                "license",
+                "attribution",
+                "use_mode",
+                "adaptation",
+                "local_path",
+                "sha256"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source_url": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "figure_url": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "license": {
+                  "type": "string"
+                },
+                "attribution": {
+                  "type": "string"
+                },
+                "use_mode": {
+                  "type": "string",
+                  "enum": [
+                    "reference",
+                    "reuse",
+                    "animate"
+                  ]
+                },
+                "adaptation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "local_path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            }
           }
         }
       },
