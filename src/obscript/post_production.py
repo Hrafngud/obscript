@@ -76,6 +76,9 @@ Do not claim success until local artifacts exist. Report blockers clearly.
         direction_path = self.config.creative_direction_path
         paths = [root / ".obscript/approved-script.json", root / ".obscript/review.json",
                  direction_path, root / "storybook.yaml"]
+        references_path = root / "visual-references.yaml"
+        if references_path.is_file():
+            paths.append(references_path)
         required = paths + [root / "production.yaml", root / "video.mp4",
                             root / ".obscript/production-inputs.json",
                             root / ".obscript/creative-direction-source.json",
@@ -102,6 +105,9 @@ Do not claim success until local artifacts exist. Report blockers clearly.
         receipt = read_json(root / ".obscript/production-inputs.json")
         expected = {str(path.relative_to(root)) if path.is_relative_to(root) else str(path):
                     file_sha256(path) for path in [*paths, root / "storybook.md"] if path.is_file()}
+        # Legacy scene re-render receipts did not record visual references.
+        if "visual-references.yaml" not in receipt.get("inputs", {}):
+            expected.pop("visual-references.yaml", None)
         if "storybook.md" not in receipt.get("inputs", {}) and (root / "storybook.md").is_file():
             _, _, edited = apply_readable_storybook(
                 storybook, (root / "storybook.md").read_text(encoding="utf-8"),
@@ -111,9 +117,21 @@ Do not claim success until local artifacts exist. Report blockers clearly.
                 raise ProductionError("Readable storybook changed after the original render; run PROJECT_ID --render first")
             expected.pop("storybook.md")
         production = read_yaml(root / "production.yaml")
-        if (production.get("status") != "complete" or receipt.get("inputs") != expected
-                or receipt.get("video_sha256") != file_sha256(root / "video.mp4")):
-            raise ProductionError("Rendered inputs or original video changed; run PROJECT_ID --render before post-production")
+        recorded = receipt.get("inputs", {})
+        mismatches = []
+        if production.get("status") != "complete":
+            mismatches.append("production.yaml status is not complete")
+        changed = sorted(name for name in recorded.keys() | expected.keys()
+                         if recorded.get(name) != expected.get(name))
+        if changed:
+            mismatches.append(f"input mismatch: {', '.join(changed)}")
+        if receipt.get("video_sha256") != file_sha256(root / "video.mp4"):
+            mismatches.append("video.mp4 hash mismatch")
+        if mismatches:
+            raise ProductionError(
+                f"Rendered inputs or original video changed ({'; '.join(mismatches)}); "
+                "run PROJECT_ID --render before post-production"
+            )
         for scene in storybook["scenes"]:
             self._verify_scene(scene, root / "production/scenes" / scene["id"])
         duration = probe_media(root / "video.mp4")

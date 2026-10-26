@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from obscript.models import PostProductionTarget
+from obscript.pipeline import ApprovedScript, Pipeline
 from obscript.post_production import PostProductionAgent
 from obscript.production import ProductionError, invalidate_downstream
 from obscript.storage import creative_direction_reference, file_sha256, read_json, read_yaml, write_json, write_yaml
@@ -72,13 +73,14 @@ class PostProductionTests(unittest.TestCase):
         patch.object(self.agent, "_execute", side_effect=self.execute).start()
 
     def write_render_receipt(self):
-        paths = [self.root / ".obscript/approved-script.json", self.root / ".obscript/review.json",
-                 self.direction, self.root / "storybook.yaml"]
-        write_json(self.root / ".obscript/production-inputs.json", {
-            "inputs": {str(path.relative_to(self.root)) if path.is_relative_to(self.root) else str(path):
-                       file_sha256(path) for path in paths},
-            "video_sha256": file_sha256(self.root / "video.mp4"),
-        })
+        script = read_json(self.root / ".obscript/approved-script.json")
+        approved = ApprovedScript(
+            script, self.root / ".obscript/approved-script.json", self.root / ".obscript/knowledge.json",
+            self.root / ".obscript/plan.json", self.root / ".obscript/review.json",
+            script["metadata"]["target_duration_seconds"],
+        )
+        with patch("obscript.pipeline.ProductionAgent.produce", return_value=self.root / "video.mp4"):
+            Pipeline(self.config)._produce_video(self.root, approved, self.direction, self.root / "storybook.yaml")
 
     def probe(self, path):
         return self.source_duration if path.name == "video.mp4" else self.duration
@@ -120,6 +122,37 @@ class PostProductionTests(unittest.TestCase):
         self.assertEqual(manifest["actual_duration_seconds"], 12)
         self.assertEqual(self.agent.polish(), result)
         self.assertEqual(self.calls, ["post-production"])
+
+    def test_polish_accepts_normal_render_with_visual_references(self):
+        references = self.root / "visual-references.yaml"
+        references.write_text("consolidated_brief: Keep explanatory motion clear.\n")
+        (self.root / "storybook.md").write_text("Rendered storybook notes")
+        self.write_render_receipt()
+        self.assertIn("visual-references.yaml", read_json(
+            self.root / ".obscript/production-inputs.json")["inputs"])
+        self.assertEqual(self.agent.polish(), self.root / "video-polished.mp4")
+        self.assertEqual(references.read_text(), "consolidated_brief: Keep explanatory motion clear.\n")
+
+    def test_changed_or_missing_rendered_visual_references_block_executor(self):
+        references = self.root / "visual-references.yaml"
+        for change in ["modify", "remove"]:
+            with self.subTest(change=change):
+                references.write_text("consolidated_brief: Original reference\n")
+                self.write_render_receipt()
+                if change == "modify":
+                    references.write_text("consolidated_brief: Changed reference\n")
+                else:
+                    references.unlink()
+                with self.assertRaisesRegex(ProductionError, "visual-references.yaml"):
+                    self.agent.polish()
+        self.assertFalse(self.calls)
+
+    def test_legacy_rerender_receipt_without_visual_references_remains_valid(self):
+        # Scene re-renders historically recorded only the four required inputs.
+        (self.root / "visual-references.yaml").write_text("consolidated_brief: Original reference\n")
+        self.assertNotIn("visual-references.yaml", read_json(
+            self.root / ".obscript/production-inputs.json")["inputs"])
+        self.assertEqual(self.agent.polish(), self.root / "video-polished.mp4")
 
     def install_many_scene_fixture(self, count: int, *, batch_size: int = 20):
         words = [f"palavra{order}" for order in range(1, count + 1)]
