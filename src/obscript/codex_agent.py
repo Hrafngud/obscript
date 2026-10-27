@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from .agent import AgentError, StructuredAgent
+from .progress import report
 from .storage import read_json, write_json
 
 # Retained for callers using the original Codex adapter.
@@ -59,7 +60,7 @@ class CodexAgent(StructuredAgent):
             command.extend(["--image", str(path)])
         command.append("-")
 
-        print(f"[obscript] codex → {stage}", flush=True)
+        report(stage, f"Codex · {stage}")
         try:
             completed = subprocess.run(
                 command,

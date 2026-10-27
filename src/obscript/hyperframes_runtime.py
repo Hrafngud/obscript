@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .progress import announce
+
 
 HYPERFRAMES_VERSION = "0.8.169"
 LAUNCHER = Path(__file__).resolve().parents[2] / "bin/obscript-hyperframes"
@@ -81,8 +83,7 @@ def ensure_runtime() -> Path:
         if not shutil.which("node") or not shutil.which("npm"):
             raise HyperframesRuntimeError("Node.js >=22 and npm are required for the shared HyperFrames runtime")
         (directory / ".ready").unlink(missing_ok=True)
-        print(f"[obscript] Installing shared HyperFrames {HYPERFRAMES_VERSION} in {directory}",
-              file=sys.stderr, flush=True)
+        announce(f"[obscript] Installing shared HyperFrames {HYPERFRAMES_VERSION} in {directory}")
         # npm installs only here. No npx cache or project-local dependency trees.
         manifest_path = directory / "package.json"
         if not manifest_path.exists():

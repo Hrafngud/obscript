@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .agent import AgentError, StructuredAgent
 from .contracts import ContractError
+from .progress import report
 from .schema_validation import validate_structure
 from .storage import read_json, write_json
 
@@ -131,7 +132,7 @@ class OpenCodeAgent(StructuredAgent):
         schema = read_json(schema_path)
         prompt += "\nOutput JSON Schema:\n" + json.dumps(schema, ensure_ascii=False)
         log_path = output_path.with_suffix(".executor.log")
-        print(f"[obscript] opencode → {stage}", flush=True)
+        report(stage, f"OpenCode · {stage}")
         command = harness.command()
         for path in image_paths:
             command.extend(["--file", str(path)])

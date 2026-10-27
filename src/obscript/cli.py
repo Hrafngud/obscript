@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ from .models import CommandSpec, PostProductionTarget, RuntimeConfig, VisualRefe
 from .visual_references import validate_config
 from .pipeline import Pipeline
 from .production import ProductionError
+from .progress import RunProgress
 from .projects import create_original_project, find_project, resume_spec
 from .storage import read_json
 from .transcribe import TranscriptionError
@@ -166,7 +168,7 @@ is mandatory and has no translate modifier.
         metavar="SCENES",
         help="maximum scenes per post-production iteration (default: 20; requires --post-production)",
     )
-    parser.add_argument("--verbose", action="store_true", help="show agent CLI output")
+    parser.add_argument("--verbose", action="store_true", help="show transcription and agent output with plain progress lines")
     parser.add_argument("--no-visual-references", action="store_true", help="skip source-video visual sampling")
     parser.add_argument("--visual-reference-clips", type=int, default=3, metavar="COUNT")
     parser.add_argument("--visual-reference-duration", type=float, default=15, metavar="SECONDS")
@@ -379,10 +381,22 @@ def main(argv: list[str] | None = None) -> int:
             post_production_target=post_production_target,
             visual_references=visual_references,
         )
-        result = Pipeline(config).run(spec)
+        with RunProgress(
+            verbose=args.verbose,
+            agent="OpenCode" if args.opencode else "Codex",
+            model=config.model or "configured default",
+            effort=config.reasoning_effort if config.harness == "codex" else "configured default",
+            project=project_root.name if project_root else args.project or "Creating project...",
+        ) as progress:
+            result = Pipeline(config).run(spec)
+            if not result.passed_review:
+                progress.outcome = "Needs review"
     except (ContractError, TranscriptionError, AgentError, ProductionError, OSError) as exc:
         print(f"obscript: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("obscript: interrupted", file=sys.stderr)
+        return 130
 
     print(f"[obscript] projeto: {result.project_root}")
     for output in result.outputs:
@@ -394,7 +408,37 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     print("[obscript] revisão aprovada")
+    if spec.storybook or spec.render or spec.rerender_scene_id:
+        project_id = spec.project_id or read_json(result.project_root / "project.json")["id"]
+        _print_next_steps(project_id, spec, args, config)
     return 0
+
+
+def _print_next_steps(project_id: str, spec: CommandSpec, args: argparse.Namespace,
+                      config: RuntimeConfig) -> None:
+    command = ["obscript", project_id, "--output-dir", str(config.output_dir)]
+    if args.opencode:
+        command.append("--opencode")
+        if args.opencode_bin:
+            command.extend(["--opencode-bin", str(config.opencode)])
+    elif args.codex:
+        command.extend(["--codex", str(config.codex)])
+    if args.model:
+        command.extend(["--model", args.model])
+    if args.reasoning_effort != "high":
+        command.extend(["--reasoning-effort", args.reasoning_effort])
+    if spec.storybook:
+        print("\nRender the video:")
+        print("  " + shlex.join([*command, "--render"]))
+    else:
+        print("\nPost-production suggestions:")
+        for label, options in (
+            ("Full polish pass", []),
+            ("Custom direction", ["Improve pacing and vary the transitions."]),
+            ("Adjust a scene", ["001", "Improve the layout and animation in this scene."]),
+        ):
+            print(f"  {label}:")
+            print("    " + shlex.join([*command, "--post-production", *options]))
 
 
 def _new_project(args: argparse.Namespace) -> int:

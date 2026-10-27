@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .asset_refs import resolve_asset_links
 from .hyperframes_runtime import copy_project
+from .progress import report as report_progress
 from .production import (
     FRAME_TOLERANCE_SECONDS,
     ProductionAgent,
@@ -327,6 +328,7 @@ Do not claim success until local artifacts exist. Report blockers clearly.
                                                       "Público do roteiro aprovado e da direção criativa compartilhada"),
                 })
                 self._execute(stage, request_path, output_dir)
+                report_progress("verify-post-production", f"Batch {batch_number}/{batch_total}")
                 check_inputs()
                 if not batch_report.is_file() or not batch_report.read_text(encoding="utf-8").strip():
                     raise ProductionError(f"Post-production batch {batch_number} did not provide its visual polish report")

@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from .agent import AgentError, StructuredAgent
 from .contracts import ContractError
 from .models import RuntimeConfig, VisualReferenceConfig
+from .progress import announce, report
 from .schema_validation import validate_structure
 from .storage import file_sha256, read_json, read_yaml, write_json, write_yaml
 
@@ -293,6 +294,7 @@ def validate_analysis(analysis: dict, segments: list[dict], schema: dict) -> Non
 
 
 def ensure_source_references(source_dir: Path, runtime: RuntimeConfig, agent: StructuredAgent) -> Path:
+    report("visual-references", source_dir.name)
     config = runtime.visual_references
     validate_config(config)
     extractor = ReferenceExtractor(runtime, source_dir)
@@ -396,7 +398,7 @@ def ensure_source_references(source_dir: Path, runtime: RuntimeConfig, agent: St
     finally:
         write_json(artifact, result)
         for error in result["errors"]:
-            print(f"[obscript] visual references ({source['id']}, {error['stage']}): {error['error']}", flush=True)
+            announce(f"[obscript] visual references ({source['id']}, {error['stage']}): {error['error']}")
     return artifact
 
 

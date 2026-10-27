@@ -39,6 +39,10 @@ OpenCode uses its existing provider authentication and model configuration. The 
 
 ## CLI
 
+During a run, an interactive terminal shows a live panel with the agent (Codex or OpenCode), model, reasoning effort, project folder name, current phase, stage or batch, phase elapsed time, and total elapsed time. Agent settings stay visible as the phase changes. Inherited model settings are labeled `configured default`; OpenCode also uses this label for effort because it manages its own setting. Redirected output and `TERM=dumb` print the run details followed by plain progress lines without animation. Use `--verbose` to show transcription and agent output with plain progress lines. Otherwise, ytstt output is saved to `TRANSCRIPTS_DIR/obscript-*/ytstt.log`; transcription failures point to that log.
+
+Successful `--storybook` runs end with a copyable `--render` command. Completed renders (including `--re-render`) suggest post-production commands for a full polish pass, custom direction, and a scene adjustment. Commands include the project ID, output directory, and selected agent settings so they can be run from another directory. Runs that fail or still need script review do not suggest advancing to the next phase.
+
 Start an original script without a video or transcript:
 
 ```bash

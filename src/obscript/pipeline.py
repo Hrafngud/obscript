@@ -16,6 +16,7 @@ from .original import import_original_script, original_context
 from .projects import create_project, find_project, update_project
 from .production import STORYBOOK_SCHEMA_VERSION, ProductionAgent, invalidate_downstream, validate_storybook
 from .post_production import PostProductionAgent
+from .progress import announce, report, report_project
 from .storage import (
     copy_if_present,
     file_sha256,
@@ -81,8 +82,9 @@ class Pipeline:
                 slugify(name, datetime.now().strftime("video-%Y%m%d-%H%M%S")),
             )
             create_project(project_root, spec, self.config.creative_direction_path)
-        print(f"[obscript] project ID: {read_json(project_root / 'project.json')['id']}", flush=True)
-        print(f"[obscript] projeto: {project_root}", flush=True)
+        report_project(project_root.name)
+        announce(f"[obscript] project ID: {read_json(project_root / 'project.json')['id']}")
+        announce(f"[obscript] projeto: {project_root}")
         update_project(project_root)
         try:
             result = self._run(spec, project_root)
@@ -142,6 +144,7 @@ class Pipeline:
 
         analyses: list[dict] = []
         for index, relative_dir in enumerate(sources, 1):
+            report("analyze-source", f"Source {index}/{len(sources)}")
             source_dir = project_root / relative_dir
             transcript_txt = source_dir / "transcript.txt"
             analysis_path = source_dir / "analysis.json"
@@ -160,7 +163,6 @@ Use stable topic IDs prefixed with source-{index:02d}/. Preserve factual qualifi
                 write_json(analysis_path, analysis)
             analyses.append(analysis)
             write_yaml(source_dir / "analysis.yaml", analysis)
-            print(f"[obscript] análise: {analysis_path}", flush=True)
 
         if spec.pipeline == "remix":
             analyses_path = project_root / ".obscript" / "source-analyses.json"
@@ -303,6 +305,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
             raise ContractError("Approved script inputs changed; restore the approved checkpoint before resuming")
 
     def _run_original(self, spec: CommandSpec, root: Path) -> PipelineResult:
+        report("import-original-script", "Reading manual script and checkpoints")
         script, inputs = import_original_script(root, spec)
         state = root / ".obscript"
         checkpoint = state / "original-inputs.json"
@@ -341,7 +344,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
                 raise ContractError("Original narration or fontes.md changed during review; your edits were preserved. Rerun to review them")
             write_yaml(root / "review.yaml", review)
             if review["verdict"] != "pass":
-                print(f"[obscript] revise seu roteiro em {root / 'script.md'} usando {root / 'review.yaml'}", flush=True)
+                announce(f"[obscript] revise seu roteiro em {root / 'script.md'} usando {root / 'review.yaml'}")
                 return PipelineResult(root, (root / "script.md", root / "review.yaml"), False)
             write_json(state / "approved-script.json", script)
             write_json(state / "review.json", review)
@@ -366,6 +369,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         return PipelineResult(root, tuple(outputs), True)
 
     def _run_re_render(self, project_root: Path, scene_id: str) -> PipelineResult:
+        report("produce-video", f"Re-rendering {scene_id}")
         metadata = read_json(project_root / "project.json")
         units = metadata.get("units", {})
         if len(units) != 1:
@@ -402,6 +406,7 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         return PipelineResult(project_root, (video, unit_dir / "production.yaml"), True)
 
     def _run_post_production(self, project_root: Path) -> PipelineResult:
+        report("post-production", "Validating completed render")
         metadata = read_json(project_root / "project.json")
         units = metadata.get("units", {})
         if not units or any(phase not in {"render", "post-production"} for phase in units.values()):
@@ -424,14 +429,15 @@ Each part must be a complete knowledge model with kind split and narrative.forma
         return PipelineResult(project_root, tuple(outputs), True)
 
     def _import_sources(self, spec: CommandSpec, project_root: Path) -> list[str]:
+        report("import-sources", "Checking saved transcripts")
         checkpoint = project_root / ".obscript/imports.json"
         imports = read_json(checkpoint) if checkpoint.exists() else []
         for source in spec.sources[len(imports):]:
-            print(f"[obscript] preparando fonte: {source}", flush=True)
+            report("transcribe", f"Source {len(imports) + 1}/{len(spec.sources)} · {source}")
             assets = ingest_source(source, ytstt=self.config.ytstt,
                                    transcripts_dir=self.config.transcripts_dir,
                                    cookies_from_browser=self.config.cookies_from_browser,
-                                   cookies=self.config.cookies)
+                                   cookies=self.config.cookies, verbose=self.config.verbose)
             directories = []
             count = sum(len(item) for item in imports)
             for index, asset in enumerate(assets, count + 1):
@@ -714,6 +720,7 @@ Return findings only; do not rewrite the script. {original_guidance}""",
         self, agent: StructuredAgent, unit_dir: Path, approved: ApprovedScript,
         direction_path: Path, *, render: bool = False, scene_count: int | None = None,
     ) -> tuple[dict, Path]:
+        report("storybook", f"Checking scene plan · {unit_dir.name}")
         if scene_count is not None:
             if scene_count < len(approved.script["sections"]):
                 raise ContractError(
@@ -879,11 +886,13 @@ Do not rewrite narration, invoke HyperFrames, or generate media. {feedback}""",
 
     def _validate_storybook(self, approved: ApprovedScript, storybook: dict,
                             scene_count: int | None = None) -> None:
+        report("validate-storybook", f"{len(storybook.get('scenes', []))} scenes")
         validate_storybook(approved.script, storybook, approved.target_seconds, scene_count=scene_count)
 
     def _produce_video(
         self, unit_dir: Path, approved: ApprovedScript, direction_path: Path, storybook_path: Path,
     ) -> Path:
+        report("produce-video", f"Checking render checkpoints · {unit_dir.name}")
         receipt_path = unit_dir / ".obscript/production-inputs.json"
         inputs = {str(path.relative_to(unit_dir)) if path.is_relative_to(unit_dir) else str(path):
                   file_sha256(path)

@@ -3,13 +3,56 @@ from __future__ import annotations
 import tempfile
 import json
 import unittest
+import subprocess
+import sys
 from unittest.mock import patch
 from pathlib import Path
 
-from obscript.transcribe import _subtitle_to_text, ingest_source
+from obscript.transcribe import TranscriptionError, _subtitle_to_text, ingest_source
 
 
 class TranscriptionTests(unittest.TestCase):
+    def test_transcription_output_is_logged_instead_of_streamed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "transcriber.py"
+            script.write_text(
+                "import pathlib, sys\n"
+                "print('transcript content')\n"
+                "print('download diagnostic', file=sys.stderr)\n"
+                "batch = pathlib.Path(sys.argv[sys.argv.index('--output-dir') + 1])\n"
+                "output = batch / 'video'\n"
+                "output.mkdir()\n"
+                "(output / 'transcript.txt').write_text('transcript content')\n"
+            )
+            transcripts = root / "transcripts"
+            transcripts.mkdir()
+            assets = ingest_source(str(script), ytstt=Path(sys.executable), transcripts_dir=transcripts)
+            self.assertEqual(len(assets), 1)
+            log = next(transcripts.glob("*/ytstt.log")).read_text()
+            self.assertIn("transcript content", log)
+            self.assertIn("download diagnostic", log)
+
+    def test_transcription_failure_points_to_preserved_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "failure.py"
+            script.write_text("import sys\nprint('provider error', file=sys.stderr)\nsys.exit(7)\n")
+            with self.assertRaises(TranscriptionError) as error:
+                ingest_source(str(script), ytstt=Path(sys.executable), transcripts_dir=root)
+            log_path = next(root.glob("*/ytstt.log"))
+            self.assertIn(str(log_path), str(error.exception))
+            self.assertIn("exit code 7", str(error.exception))
+            self.assertIn("provider error", log_path.read_text())
+
+    def test_verbose_transcription_inherits_terminal_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("obscript.transcribe.subprocess.run", side_effect=subprocess.CalledProcessError(3, "ytstt")) as run:
+                with self.assertRaisesRegex(TranscriptionError, "terminal output"):
+                    ingest_source("VIDEO", ytstt=Path("ytstt"), transcripts_dir=Path(temporary), verbose=True)
+            self.assertIsNone(run.call_args.kwargs["stdout"])
+            self.assertIsNone(run.call_args.kwargs["stderr"])
+
     def test_import_retains_individual_video_url_for_visual_references(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

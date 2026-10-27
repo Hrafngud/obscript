@@ -13,6 +13,7 @@ from .asset_refs import ASSET_LIBRARY_ROOT, resolve_asset_links
 from .models import RuntimeConfig
 from .agent import AgentError
 from .opencode_agent import OpenCodeHarness
+from .progress import report
 from .schema_validation import validate_structure
 from .storage import creative_direction_reference, file_sha256, read_creative_direction, read_json, read_yaml, render_storybook, write_json, write_yaml
 from .storybook_edits import apply_readable_storybook
@@ -277,6 +278,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
 """
 
     def _execute(self, stage: str, request_path: Path, output_dir: Path) -> None:
+        report(stage, f"{self.config.agent_name} · {stage}")
         try:
             ensure_runtime()
             prepare_project(output_dir / "hyperframes")
@@ -311,7 +313,6 @@ Do not claim success until requested local artifacts exist. Report errors clearl
             if self.config.model:
                 command.extend(["--model", self.config.model])
             command.append("-")
-        print(f"[obscript] produção → {stage}", flush=True)
         try:
             result = subprocess.run(command, input=prompt, text=True, capture_output=True, check=False, **execution_options)
         except OSError as exc:
@@ -636,6 +637,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                     # Verify durable partial output even when this executor iteration fails.
                     execution_error = exc
                 check_inputs()
+                report("verify-render", f"Batch {batch_number}/{batch_total} · checking scene media")
                 for scene, output, current in batch_items:
                     scene_manifest_path = Path(output["manifest"])
                     try:
@@ -660,6 +662,7 @@ Do not claim success until requested local artifacts exist. Report errors clearl
                 scene_manifest_path = None
                 if execution_error:
                     raise execution_error
+            report("verify-render", "Checking assembled video")
             duration = probe_media(assembled_video)
             if not math.isclose(duration, target, rel_tol=0, abs_tol=FRAME_TOLERANCE_SECONDS):
                 raise ProductionError("Final animation duration differs from the storybook timeline")

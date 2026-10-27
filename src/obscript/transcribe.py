@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,7 @@ def _normalize_transcript_file(local: Path, source: str, transcripts_dir: Path) 
 def ingest_source(
     source: str, *, ytstt: Path, transcripts_dir: Path,
     cookies_from_browser: str | None = None, cookies: Path | None = None,
+    verbose: bool = False,
 ) -> list[SourceAsset]:
     local = Path(source).expanduser()
     if local.is_dir():
@@ -125,13 +127,18 @@ def ingest_source(
         command.extend(["--cookies", str(cookies)])
     else:
         command.extend(["--cookies-from-browser", cookies_from_browser or "firefox"])
+    log_path = batch / "ytstt.log"
     try:
-        subprocess.run(command, check=True)
+        with log_path.open("w", encoding="utf-8") if not verbose else nullcontext() as log:
+            subprocess.run(command, check=True, stdout=log,
+                           stderr=subprocess.STDOUT if not verbose else None)
     except FileNotFoundError as exc:
         raise TranscriptionError(f"ytstt executable not found: {ytstt}") from exc
     except subprocess.CalledProcessError as exc:
-        raise TranscriptionError(f"ytstt failed for {source!r} with exit code {exc.returncode}") from exc
+        details = "; see terminal output" if verbose else f"; see {log_path}"
+        raise TranscriptionError(f"ytstt failed for {source!r} with exit code {exc.returncode}{details}") from exc
     directories = sorted(path for path in batch.iterdir() if path.is_dir())
     if not directories:
-        raise TranscriptionError(f"ytstt produced no transcript directories in {batch}")
+        raise TranscriptionError(f"ytstt produced no transcript directories in {batch}" +
+                                 ("" if verbose else f"; see {log_path}"))
     return [_asset_from_directory(path, source) for path in directories]

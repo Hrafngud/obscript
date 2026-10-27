@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 import contextlib
 import io
+import shlex
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
@@ -13,6 +14,9 @@ from obscript.contracts import parse_command_tokens
 from obscript.projects import create_project
 from obscript.models import RuntimeConfig
 from obscript.storage import read_json, read_yaml
+from obscript.pipeline import PipelineResult
+from obscript.production import ProductionError
+from obscript.progress import report
 
 
 class NewProjectTests(unittest.TestCase):
@@ -270,6 +274,9 @@ class CliDefaultsTests(unittest.TestCase):
             result.passed_review = True
             result.outputs = []
             with tempfile.TemporaryDirectory() as directory:
+                result.project_root = Path(directory) / "project"
+                result.project_root.mkdir()
+                create_project(result.project_root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
                 self.assertEqual(main(["VIDEO", "--storybook", "10", "--output-dir", directory,
                                        "--transcripts-dir", directory]), 0)
             spec = pipeline.return_value.run.call_args.args[0]
@@ -413,6 +420,112 @@ class OpenCodeCliTests(unittest.TestCase):
             self.assertEqual(main(['VIDEO', '--opencode-bin', '/custom/opencode', '--dry-run']), 1)
             with self.assertRaises(SystemExit):
                 build_parser().parse_args(['VIDEO', '--opencode', '--codex', '/custom/codex'])
+
+
+class RunPresentationTests(unittest.TestCase):
+    def test_viewer_shows_selected_agent_model_effort_and_project(self):
+        for harness, flags, model, effort in (
+            ("Codex", [], "configured default", "high"),
+            ("Codex", ["--model", "test-model", "--reasoning-effort", "medium"], "test-model", "medium"),
+            ("OpenCode", ["--opencode"], "configured default", "configured default"),
+            ("OpenCode", ["--opencode", "--model", "provider/model", "--reasoning-effort", "low"],
+             "provider/model", "configured default"),
+        ):
+            with self.subTest(harness=harness, model=model), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "my-project"
+                root.mkdir()
+                metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+                with patch("obscript.cli.Pipeline") as pipeline, \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as output:
+                    pipeline.return_value.run.return_value = PipelineResult(root, (), True)
+                    self.assertEqual(main([metadata["id"], "--vault", directory,
+                                           "--transcripts-dir", directory, *flags]), 0)
+                for field in (f"Agent: {harness}", f"Model: {model}", f"Effort: {effort}", "Project: my-project"):
+                    self.assertIn(field, output.getvalue())
+
+    def test_viewer_uses_actual_created_project_folder_after_collision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "vault"
+            (vault / "my-project").mkdir(parents=True)
+            with patch("obscript.cli._resolve_codex", return_value=Path("codex")), \
+                 patch("obscript.pipeline.Pipeline._run",
+                       side_effect=lambda spec, root: PipelineResult(root, (), True)), \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(main(["VIDEO", "--project", "My Project", "--vault", str(vault),
+                                       "--transcripts-dir", directory]), 0)
+            self.assertIn("Project: my-project-2", output.getvalue())
+            self.assertTrue((vault / "my-project-2" / "project.json").is_file())
+
+    def test_success_suggests_copyable_commands_with_project_and_agent_settings(self):
+        for flag in ("--storybook", "--render", "--re-render"):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as directory:
+                vault = Path(directory) / "vault with 'quotes' and spaces"
+                root = vault / "project"
+                root.mkdir(parents=True)
+                metadata = create_project(root, parse_command_tokens(["VIDEO"]), vault / "shared.md")
+                flags = [flag, "005"] if flag == "--re-render" else [flag]
+                with patch("obscript.cli.Pipeline") as pipeline, \
+                     contextlib.redirect_stdout(io.StringIO()) as output, \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    pipeline.return_value.run.return_value = PipelineResult(root, (), True)
+                    self.assertEqual(main([metadata["id"], *flags, "--vault", str(vault),
+                                           "--opencode", "--opencode-bin", "/custom agent/opencode",
+                                           "--model", "provider/model", "--reasoning-effort", "medium",
+                                           "--transcripts-dir", directory]), 0)
+                commands = [shlex.split(line.strip()) for line in output.getvalue().splitlines()
+                            if line.strip().startswith("obscript ")]
+                self.assertEqual(len(commands), 1 if flag == "--storybook" else 3)
+                for command in commands:
+                    parsed = build_parser().parse_args(command[1:])
+                    self.assertEqual(parsed.command, [metadata["id"]])
+                    self.assertEqual(parsed.output_dir, vault)
+                    self.assertTrue(parsed.opencode)
+                    self.assertEqual(parsed.opencode_bin, Path("/custom agent/opencode"))
+                    self.assertEqual(parsed.model, "provider/model")
+                    self.assertEqual(parsed.reasoning_effort, "medium")
+                    self.assertEqual(parsed.render, flag == "--storybook")
+                    if flag != "--storybook":
+                        self.assertIsNotNone(parsed.post_production)
+
+    def test_custom_codex_is_preserved_in_render_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+            with patch("obscript.cli.Pipeline") as pipeline, \
+                 contextlib.redirect_stdout(io.StringIO()) as output, \
+                 contextlib.redirect_stderr(io.StringIO()):
+                pipeline.return_value.run.return_value = PipelineResult(root, (), True)
+                self.assertEqual(main([metadata["id"], "--storybook", "--vault", directory,
+                                       "--codex", "/custom agent/codex"]), 0)
+            command = next(shlex.split(line.strip()) for line in output.getvalue().splitlines()
+                           if line.strip().startswith("obscript "))
+            parsed = build_parser().parse_args(command[1:])
+            self.assertEqual(parsed.codex, Path("/custom agent/codex"))
+
+    def test_failure_review_rejection_and_interrupt_do_not_suggest_next_steps(self):
+        for failure, code, status in [(None, 2, "Needs review"),
+                                      (ProductionError("render failed"), 1, "Failed"),
+                                      (KeyboardInterrupt(), 130, "Interrupted")]:
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "project"
+                root.mkdir()
+                metadata = create_project(root, parse_command_tokens(["VIDEO"]), Path(directory) / "shared.md")
+
+                def run(spec):
+                    report("produce-video", "Batch 1/2")
+                    if failure:
+                        raise failure
+                    return PipelineResult(root, (), False)
+
+                with patch("obscript.cli.Pipeline") as pipeline, \
+                     contextlib.redirect_stdout(io.StringIO()) as output, \
+                     contextlib.redirect_stderr(io.StringIO()) as error:
+                    pipeline.return_value.run.side_effect = run
+                    self.assertEqual(main([metadata["id"], "--render", "--vault", directory]), code)
+                self.assertIn(status, error.getvalue())
+                self.assertNotIn("Post-production suggestions", output.getvalue())
+                self.assertNotIn("Render the video:", output.getvalue())
 
 
 if __name__ == "__main__":
