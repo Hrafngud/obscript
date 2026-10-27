@@ -17,6 +17,7 @@ from .schema_validation import validate_structure
 from .storage import creative_direction_reference, file_sha256, read_creative_direction, read_json, read_yaml, render_storybook, write_json, write_yaml
 from .storybook_edits import apply_readable_storybook
 from .visual_references import reference_handoff
+from .hyperframes_runtime import HyperframesRuntimeError, ensure_runtime, prepare_project, runtime_handoff, runtime_instructions
 
 
 FRAME_TOLERANCE_SECONDS = 1 / 30 + 1e-6
@@ -232,6 +233,7 @@ def hyperframes_handoff(output_dir: Path, duration: float, message: str, audienc
     """Supply settled intent for a silent general-video composition, without intake."""
     return {
         "project_directory": str(output_dir / "hyperframes"),
+        "runtime": runtime_handoff(),
         "brief": {
             "workflow": "general-video", "flow": "automation", "storyboard": "no",
             "message": message, "destination": "desktop", "aspect": "1920x1080",
@@ -275,7 +277,12 @@ Do not claim success until requested local artifacts exist. Report errors clearl
 """
 
     def _execute(self, stage: str, request_path: Path, output_dir: Path) -> None:
-        prompt = self._execution_prompt(request_path, output_dir)
+        try:
+            ensure_runtime()
+            prepare_project(output_dir / "hyperframes")
+        except (HyperframesRuntimeError, OSError, ValueError, TypeError) as exc:
+            raise ProductionError(f"Cannot prepare shared HyperFrames runtime: {exc}") from exc
+        prompt = self._execution_prompt(request_path, output_dir) + "\n" + runtime_instructions()
         state = self.project_root / ".obscript"
         state.mkdir(parents=True, exist_ok=True)
         (state / f"{stage}.prompt.txt").write_text(prompt, encoding="utf-8")

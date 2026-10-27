@@ -1244,7 +1244,8 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertFalse((self.root / "video.mp4").exists())
         self.assertEqual(self.calls, ["produce-video"])
 
-    def test_executor_cause_replaces_incomplete_scene_manifest_error(self):
+    @patch("obscript.production.ensure_runtime")
+    def test_executor_cause_replaces_incomplete_scene_manifest_error(self, ensure_runtime):
         output = self.root / "production"
         result = subprocess.CompletedProcess(
             [], 1, "partial progress", "ERROR: You’ve hit your usage limit. Try again later.\n",
@@ -1263,7 +1264,8 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertIsNone(manifest["final_video"])
         self.assertFalse((self.root / "video.mp4").exists())
 
-    def test_opencode_auth_failure_is_preserved_in_scene_and_production_manifests(self):
+    @patch("obscript.production.ensure_runtime")
+    def test_opencode_auth_failure_is_preserved_in_scene_and_production_manifests(self, ensure_runtime):
         self.agent.config = replace(self.agent.config, harness="opencode", opencode=Path("opencode"),
                                     render_batch_size=3)
         error = {"type": "provider.auth", "message": "User not found.", "status": 401,
@@ -1500,7 +1502,8 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertAlmostEqual(probe_media(video), 12, delta=0.04)
         self.assertEqual(load_yaml(self.root / "production.yaml")["status"], "complete")
 
-    def test_production_executor_has_write_boundary_without_schema(self):
+    @patch("obscript.production.ensure_runtime")
+    def test_production_executor_has_write_boundary_without_schema(self, ensure_runtime):
         output = self.root / "production"
         output.mkdir(parents=True)
         request = self.root / ".obscript/request.json"
@@ -1512,6 +1515,9 @@ class ProductionExecutionTests(unittest.TestCase):
         self.assertEqual(command[command.index("-C") + 1], str(output))
         self.assertNotIn("--output-schema", command)
         self.assertIn("$hyperframes", run.call_args.kwargs["input"])
+        ensure_runtime.assert_called_once()
+        self.assertIn("obscript-hyperframes", run.call_args.kwargs["input"])
+        self.assertIn("Do not run HyperFrames upgrade", run.call_args.kwargs["input"])
         self.assertIn("Do not launch nested agent harness runs", run.call_args.kwargs["input"])
         self.assertIn("assets/background1", run.call_args.kwargs["input"])
         self.assertIn("one-in-five scene coverage", run.call_args.kwargs["input"])

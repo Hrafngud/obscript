@@ -172,7 +172,8 @@ class OpenCodeExecutionTests(unittest.TestCase):
             with self.subTest(stream=stream):
                 self.assertEqual(OpenCodeHarness.error_detail(stream), expected)
 
-    def test_subprocess_handoff_without_running_opencode(self):
+    @patch('obscript.production.ensure_runtime')
+    def test_subprocess_handoff_without_running_opencode(self, ensure_runtime):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             root = Path(directory)
             executable = root / 'fake-opencode'
@@ -213,7 +214,8 @@ class OpenCodeExecutionTests(unittest.TestCase):
                                          else f'{stage}.agent-response.txt')
                     self.assertEqual(response.read_text(), 'Completed silent rendering.\n')
 
-    def test_render_and_post_production_use_the_same_native_adapter(self):
+    @patch('obscript.production.ensure_runtime')
+    def test_render_and_post_production_use_the_same_native_adapter(self, ensure_runtime):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
             root = Path(directory)
             config = replace(config_fixture(root), harness='opencode', opencode=Path('/custom/opencode'))
@@ -240,6 +242,7 @@ class OpenCodeExecutionTests(unittest.TestCase):
                     self.assertEqual(permission['bash'], 'allow')
                     self.assertEqual(permission['task'], 'deny')
                     self.assertIn('$hyperframes', call.kwargs['input'])
+                    self.assertIn('obscript-hyperframes', call.kwargs['input'])
                     self.assertIn('Never generate', call.kwargs['input'])
                     self.assertEqual((output / 'agent-response.txt').read_text(), 'Completed silent rendering.\n')
                     self.assertTrue((output / 'executor.log').exists())

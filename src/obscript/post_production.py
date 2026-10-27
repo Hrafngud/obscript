@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .asset_refs import resolve_asset_links
+from .hyperframes_runtime import copy_project
 from .production import (
     FRAME_TOLERANCE_SECONDS,
     ProductionAgent,
@@ -195,7 +196,7 @@ Do not claim success until local artifacts exist. Report blockers clearly.
         # Resume partial work only when its source inputs still match.
         editable = output_dir / "hyperframes"
         if not editable.exists():
-            shutil.copytree(root / "production/hyperframes", editable)
+            copy_project(root / "production/hyperframes", editable)
         selected_scenes = (scenes if target is None else
                            [scene for scene in scenes if scene["id"] in target.scene_ids])
         scene_batches = ([selected_scenes] if target is not None and target.mode == "transition" else

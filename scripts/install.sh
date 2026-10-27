@@ -26,6 +26,7 @@ install_link() {
 }
 
 install_link "$OBScript_ROOT/bin/obscript" "$OBScript_BIN_DIR/obscript"
+install_link "$OBScript_ROOT/bin/obscript-hyperframes" "$OBScript_BIN_DIR/obscript-hyperframes"
 
 for skill_path in "$OBScript_ROOT"/skills/*; do
     [[ -d "$skill_path" ]] || continue

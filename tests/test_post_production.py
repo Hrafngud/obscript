@@ -344,6 +344,23 @@ class PostProductionTests(unittest.TestCase):
         self.assertEqual(manifest["status"], "failed")
         self.assertIsNone(manifest["final_video"])
 
+    def test_copy_excludes_runtime_and_preserves_editable_assets(self):
+        source = self.editable.parent
+        for name in ["node_modules/hyperframes/dist/studio/index.html", ".git/objects/test", ".cache/test",
+                     "compositions/node_modules/tool/index.js", "assets/diagram.svg", "compositions/scene.html",
+                     "dist/authored.js"]:
+            path = source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(name)
+        self.agent.polish()
+        copied = self.root / "post-production/hyperframes"
+        for name in ["node_modules", ".git", ".cache", "compositions/node_modules"]:
+            self.assertFalse((copied / name).exists(), name)
+            self.assertTrue((source / name).exists(), name)
+        for name in ["assets/diagram.svg", "compositions/scene.html", "dist/authored.js"]:
+            self.assertEqual((copied / name).read_bytes(), (source / name).read_bytes())
+        self.assertEqual(self.requests[0]["hyperframes"]["runtime"]["install_scope"], "shared")
+
     def test_executor_failure_resumes_copied_project(self):
         self.failure = True
         with self.assertRaisesRegex(ProductionError, "synthetic executor failure"):

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OBScript_HF_ENTRYPOINT="$(readlink -f -- "${BASH_SOURCE[0]}")"
+OBScript_HF_ROOT="$(cd -- "$(dirname -- "$OBScript_HF_ENTRYPOINT")/.." && pwd)"
+export PYTHONPATH="$OBScript_HF_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m obscript.hyperframes_runtime "$@"

@@ -162,14 +162,14 @@ storybook.md              # readable scene plan, with --storybook or --render
 storybook.yaml            # detailed structured plan, with --storybook or --render
 storybook-review.yaml     # independent per-scene graphical review and researched diagrams
 production/               # only with --render
-  hyperframes/            # shared editable composition project
+  hyperframes/            # editable composition source and assets; no runtime install
   scenes/scene-001/
     manifest.json
     ...silent rendered scene media...
 production.yaml           # only after a render attempt
 video.mp4                 # silent animations, only after verified assembly
 post-production/          # optional polish pass; source production stays intact
-  hyperframes/            # editable copy with polished effects and transitions
+  hyperframes/            # editable source copy with polished effects and transitions
   report.md               # affected scenes, treatments, and visual checks
 post-production.yaml      # polish status, source hash, duration, output paths
 video-polished.mp4        # verified silent post-production result
@@ -195,6 +195,10 @@ The reviewer may research weak concepts in original documentation, authors' blog
 Scenes can carry `external_graphics` with local paths, content hashes, provenance, and `reference`, `reuse`, or `animate` directions. Reference-only images inform an original graphic; reuse and animation display the actual figure only with recorded reusable terms or permission. A raster diagram can use staged reveals, masks, highlights, traveling tokens, overlays, or camera focus without requiring editable layers. Verified reused diagrams can satisfy foreground coverage, and the local `background1` quota still applies. Production receives the frozen figures and planned treatment; missing or changed files fail validation. Reports retain the original findings, resolved source references, and repair checks. This review judges the plan; rendered-frame quality remains part of production.
 
 Rendering uses sequential runs of the selected harness through `ProductionAgent`, which invokes `$produce-video` and delegates animation execution to the installed `$hyperframes` skill. Each handoff contains the verbatim shared creative-direction Markdown, its source path, a visual-reference collection, and one bounded storyboard batch with immutable narration references, planned timestamps, and scene output destinations. All iterations resume the same editable project at `production/hyperframes/`; only the final iteration receives the compact all-scene assembly map and final video destination. The producer writes `BRIEF.md` after initialization and extends the project across batches. Defaults are 20 pending scenes per iteration, 1920×1080, and 30 fps; the explicit `--render` request supplies render authorization after required quality checks.
+
+HyperFrames CLI and its prebuilt Studio are installed once per user in `${XDG_CACHE_HOME:-~/.cache}/obscript/hyperframes`, shared by every project and by post-production. Set `OBSCRIPT_HYPERFRAMES_HOME` to use another shared location. The application installs the pinned `hyperframes@0.8.169` before starting the production agent; subsequent batches and projects reuse it without another npm install. An installation lock prevents concurrent runs from installing it twice. Node.js 22+ and npm are required for setup; FFmpeg/ffprobe remain required for rendering and verification. Runtime version changes are managed centrally in `src/obscript/hyperframes_runtime.py`, rather than by upgrading individual compositions.
+
+Use `obscript-hyperframes` (installed by `scripts/install.sh`, or available as `bin/obscript-hyperframes`) for initialization, checks, Studio preview, and renders. It serves any composition from the same shared installation; each composition still has its own editable source and media. For example, from a project's `production/hyperframes/`, run `obscript-hyperframes preview --background` or `obscript-hyperframes check`. The agent handoff supplies this launcher's absolute path, and initialization rewrites generated npm scripts to call it. Do not run project-local npm installs or build Studio in these folders. Existing project scripts are updated when resumed; existing dependency directories are left in place, but post-production copies exclude `node_modules`, Git metadata, and tool caches. Removing old dependency directories is a separate cleanup step.
 
 ### Automated source-video visual references
 
